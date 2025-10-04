@@ -36,6 +36,7 @@ class CSMAPersistente:
 
 
 
+    @staticmethod
     def make_sense_with_recv_once(recv_once_callable):
         """
         recv_once_callable(timeout: float) -> (payload: bytes|None)
