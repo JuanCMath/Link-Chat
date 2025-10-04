@@ -12,19 +12,16 @@ Requisitos:
 
 Descripción:
   GUI mínima para enviar/recibir tramas Ethernet crudas con un Ethertype propio.
-  No usa IP/UDP/TCP: todo es capa de enlace (L2). Ideal para tu proyecto "LinkChat".
+  No usa IP/UDP/TCP: todo es capa de enlace (L2).
 
   Funcionalidades:
-   - Elegir interfaz (ej. eth0)
+   - Elegir interfaz (p. ej. eth0)
    - Elegir Ethertype (por defecto 0x88B5)
    - Introducir MAC destino (broadcast por defecto ff:ff:ff:ff:ff:ff)
    - Enviar payload (texto) como bytes crudos (UTF-8)
    - Ver frames entrantes con tu Ethertype
    - Hilo separado para escucha continua
 
-Nota FCS: normalmente el FCS/CRC lo gestiona la NIC/driver; este ejemplo no calcula FCS.
-
-Seguridad: esto es un ejemplo educativo. No validar todo. Ajusta para producción.
 """
 from __future__ import annotations
 import os
