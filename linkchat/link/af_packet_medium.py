@@ -52,7 +52,7 @@ class AFPacketMedium:
         path = f"/sys/class/net/{iface}/address"
         with open(path, "r") as f:
             mac_txt = f.read().strip()
-        return bytes(int(b, 16) for b in mac_txt.split(":"))
+        return AFPacketMedium.mac_str_to_bytes(mac_txt)
 
     @staticmethod
     def mac_str_to_bytes(mac: str) -> bytes:
