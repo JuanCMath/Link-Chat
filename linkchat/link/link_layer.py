@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from .af_packet_medium import AFPacketMedium
-from .csma_persistente import CSMAPersistente
+from .csma_persistent import CSMAPersistent
 from .framing import frame_decode, frame_encode
 
 
@@ -44,7 +44,7 @@ class LinkFrame:
     Attributes:
         dst: Destination MAC address (6 bytes).
         src: Source MAC address (6 bytes).
-        typ: Frame type indicator.
+        typ: Frame type indicator (2 bytes).
         seq: Sequence number (0-65535).
         payload: Frame payload data (variable length bytes).
     """
@@ -97,11 +97,11 @@ class LinkLayer:
         self._stop_rx = threading.Event()
         self._rx_thread: Optional[threading.Thread] = None
 
-        self.csma = CSMAPersistente(
-            sense_func=CSMAPersistente.make_sense_with_recv_once(self.medium.recv_once),
+        self.csma = CSMAPersistent(
+            sense_func=CSMAPersistent.make_sense_with_recv_once(self.medium.recv_once),
             send_func=self._csma_send,
             difs=sense_timeout,
-        )
+        ) #cual es la funcion de cada una de las propiedades definidas en la clase?
 
     @property
     def mac(self) -> bytes:
@@ -144,10 +144,9 @@ class LinkLayer:
 
         with self._lock:
             self._tx_dst = dst
-        try:
-            self.csma.send(frame)
-        finally:
-            with self._lock:
+            try:
+                self.csma.send(frame)
+            finally:
                 self._tx_dst = None
 
     def _csma_send(self, data: bytes) -> None:
@@ -208,7 +207,7 @@ class LinkLayer:
             packet = self.medium.recv_once(timeout=0.2)
             if packet is None:
                 continue
-            dst, src, _, payload = packet
+            dst, src, etype, payload = packet
             if src == self.mac:
                 continue
             try:
