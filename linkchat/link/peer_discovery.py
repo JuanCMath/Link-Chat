@@ -1,9 +1,9 @@
 """Peer discovery service for Link-Chat.
 
-Provides automatic neighbor detection on a shared Ethernet segment using periodic
-beacon broadcasts. Each node advertises its identity, display name, available services,
-and arbitrary metadata. Peers that stop sending beacons are automatically pruned after
-a configurable expiry interval.
+Provides automatic neighbor detection using periodic beacon broadcasts. 
+Each node advertises its identity, display name, available services, and 
+arbitrary metadata. Peers that stop sending beacons are automatically pruned 
+after a configurable expiry interval.
 
 The discovery protocol uses a simple framing:
     MAGIC (3 bytes) | VERSION (1 byte) | JSON payload (variable)

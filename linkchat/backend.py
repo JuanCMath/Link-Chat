@@ -14,10 +14,12 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from .constants import ETHERTYPE_DATA, ETHERTYPE_DISCOVERY
 from .link.af_packet_medium_eth_wifi import AFPacketMediumEthWifi
 from .link.link_layer import FrameType, LinkFrame, LinkLayer
 from .link.message_protocol import MessageProtocol
 from .link.file_transfer import FileTransfer
+from .link.peer_discovery import PeerDiscoveryService, PeerInfo
 from .link.adaptive_params import message_params_from_medium, file_params_from_medium
 
 
@@ -40,8 +42,9 @@ class LinkChatBackend:
     def __init__(
         self,
         interface: str,
-        ethertype: int = 0x88B5,
+        ethertype: int = ETHERTYPE_DATA,
         download_dir: str = "./downloads",
+        node_name: Optional[str] = None,
     ) -> None:
         """Initialize the backend controller without starting networking.
         
@@ -54,12 +57,13 @@ class LinkChatBackend:
             interface: Network interface name to use for communication. Must be
                 a valid Linux network interface (e.g., "eth0", "enp3s0", "wlan0").
                 The interface must exist and be accessible to the current user.
-            ethertype: Custom EtherType value for protocol identification. Default
-                is 0x88B5 which is within the experimental range. All Link-Chat
+            ethertype: Custom EtherType value for data protocol identification. Default
+                is ETHERTYPE_DATA (0x88B5) within the experimental range. All Link-Chat
                 instances must use the same EtherType to communicate.
             download_dir: Directory path for storing received files. Created
                 automatically with parent directories if it doesn't exist. Relative
                 paths are resolved from the current working directory.
+            node_name: Optional display name for this node in peer discovery.
         
         Raises:
             OSError: If download directory cannot be created due to permission
@@ -69,19 +73,21 @@ class LinkChatBackend:
         self.ethertype = ethertype
         self.download_dir = Path(download_dir)
         self.download_dir.mkdir(parents=True, exist_ok=True)
+        self.node_name = node_name
         
         # GUI callbacks (set these before calling start())
         self.on_message_received: Optional[Callable[[bytes, str], None]] = None
         self.on_file_progress: Optional[Callable[[str, int, int], None]] = None
         self.on_file_complete: Optional[Callable[[str, bool], None]] = None
-        self.on_peer_discovered: Optional[Callable[[bytes, str], None]] = None
-        self.on_peer_lost: Optional[Callable[[bytes], None]] = None
+        self.on_peer_available: Optional[Callable[[PeerInfo], None]] = None
+        self.on_peer_expired: Optional[Callable[[PeerInfo], None]] = None
         
         # Internal components (initialized in start())
         self._medium: Optional[AFPacketMediumEthWifi] = None
         self._link_layer: Optional[LinkLayer] = None
         self._message_protocol: Optional[MessageProtocol] = None
         self._file_transfer: Optional[FileTransfer] = None
+        self._peer_discovery: Optional[PeerDiscoveryService] = None
         
         self._lock = threading.Lock()
         self._running = False
@@ -175,8 +181,18 @@ class LinkChatBackend:
                 inter_chunk_delay=file_params.inter_chunk_delay,
             )
             
+            # Create peer discovery service on separate EtherType
+            self._peer_discovery = PeerDiscoveryService(
+                interface=self.interface,
+                ethertype=ETHERTYPE_DISCOVERY,
+                display_name=self.node_name,
+                on_peer_available=self._on_peer_available_callback,
+                on_peer_expired=self._on_peer_expired_callback,
+            )
+            
             # Start listening for incoming frames
             self._link_layer.start_listening()
+            self._peer_discovery.start()
             
             self._running = True
     
@@ -187,6 +203,10 @@ class LinkChatBackend:
                 return
             
             self._running = False
+            
+            if self._peer_discovery:
+                self._peer_discovery.stop()
+                self._peer_discovery = None
             
             if self._link_layer:
                 self._link_layer.stop()
@@ -291,6 +311,48 @@ class LinkChatBackend:
         """Internal callback when file transfer completes."""
         if self.on_file_complete:
             self.on_file_complete(filename, success)
+    
+    def _on_peer_available_callback(self, peer: PeerInfo) -> None:
+        """Internal callback when a new peer is discovered."""
+        if self.on_peer_available:
+            self.on_peer_available(peer)
+    
+    def _on_peer_expired_callback(self, peer: PeerInfo) -> None:
+        """Internal callback when a peer times out."""
+        if self.on_peer_expired:
+            self.on_peer_expired(peer)
+    
+    # ------------------------------------------------------------------
+    # Peer discovery utilities
+    # ------------------------------------------------------------------
+    
+    def list_peers(self):
+        """Get list of currently discovered peers.
+        
+        Returns:
+            List of PeerInfo objects if running, empty list otherwise.
+        """
+        if not self._running or not self._peer_discovery:
+            return []
+        return self._peer_discovery.list_peers()
+    
+    def add_service(self, service_name: str) -> None:
+        """Advertise an additional service capability.
+        
+        Args:
+            service_name: Service identifier (e.g., 'chat', 'file-transfer').
+        """
+        if self._peer_discovery:
+            self._peer_discovery.add_service(service_name)
+    
+    def remove_service(self, service_name: str) -> None:
+        """Stop advertising a service capability.
+        
+        Args:
+            service_name: Service identifier to remove.
+        """
+        if self._peer_discovery:
+            self._peer_discovery.remove_service(service_name)
     
     # ------------------------------------------------------------------
     # Utility methods
