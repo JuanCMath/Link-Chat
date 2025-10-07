@@ -15,19 +15,19 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, Tuple
 
 from .link_layer import FrameType, LinkFrame, LinkLayer
+from .adaptive_params import MessageParams, message_params_from_medium
 
 # Message header format: message_id(2) + total_parts(2) + part_index(2) = 6 bytes
 _MESSAGE_HEADER_BYTES = 6
-# Default maximum payload size for messages before fragmentation
-_MESSAGE_DEFAULT_PAYLOAD = 1024
+# Default parameters used when adaptive detection is unavailable
+_MESSAGE_DEFAULTS = MessageParams(
+    max_payload=1024,
+    ack_timeout=2.0,
+    max_retries=5,
+    inter_part_delay=0.005,
+)
 # ACK frame prefix byte to distinguish message ACKs from file transfer ACKs
 _MESSAGE_ACK_PREFIX = 0x4D  # 'M'
-# Time in seconds to wait for ACK before considering transmission failed
-_MESSAGE_ACK_TIMEOUT = 2.0
-# Maximum number of transmission attempts before giving up
-_MESSAGE_MAX_RETRIES = 5
-# Delay between sending message parts to avoid overwhelming the medium
-_MESSAGE_INTER_PART_DELAY = 0.005
 # Size of the acknowlegment message: Prefix (1 byte) + message_id (2 bytes)
 _MESSAGE_ACK_SIZE = 3
 
@@ -66,10 +66,10 @@ class MessageProtocol:
         self,
         link_layer: LinkLayer,
         on_message: Optional[Callable[[bytes, str], None]] = None,
-        max_payload: int = _MESSAGE_DEFAULT_PAYLOAD,
-        ack_timeout: float = _MESSAGE_ACK_TIMEOUT,
-        max_retries: int = _MESSAGE_MAX_RETRIES,
-        inter_part_delay: float = _MESSAGE_INTER_PART_DELAY,
+        max_payload: Optional[int] = None,
+        ack_timeout: Optional[float] = None,
+        max_retries: Optional[int] = None,
+        inter_part_delay: Optional[float] = None,
     ) -> None:
         """Initialize the message protocol layer.
         
@@ -82,15 +82,32 @@ class MessageProtocol:
             on_message: Optional callback(src_mac, text) invoked when a complete
                 message is received and decoded.
             max_payload: Maximum payload size before fragmentation (minimum 7 bytes).
-            ack_timeout: Seconds to wait for ACK before retry.
-            max_retries: Maximum transmission attempts before giving up.
+                If None, derived from the link layer's medium via adaptive parameters.
+            ack_timeout: Seconds to wait for ACK before retry. If None, derived
+                from adaptive parameters.
+            max_retries: Maximum transmission attempts before giving up. If None,
+                derived from adaptive parameters.
             inter_part_delay: Delay in seconds between sending message parts.
+                If None, derived from adaptive parameters.
         """
+        try:
+            medium = link_layer.medium  # type: ignore[attr-defined]
+        except AttributeError:
+            medium = None
+
+        adaptive_params: MessageParams = _MESSAGE_DEFAULTS
+        if medium is not None:
+            adaptive_params = message_params_from_medium(medium)
+
+        resolved_max_payload = max_payload if max_payload is not None else adaptive_params.max_payload
+        self.ack_timeout = ack_timeout if ack_timeout is not None else adaptive_params.ack_timeout
+        self.max_retries = max_retries if max_retries is not None else adaptive_params.max_retries
+        self.inter_part_delay = (
+            inter_part_delay if inter_part_delay is not None else adaptive_params.inter_part_delay
+        )
+
         self.link_layer = link_layer
         self.on_message = on_message
-        self.ack_timeout = ack_timeout
-        self.max_retries = max_retries
-        self.inter_part_delay = inter_part_delay
 
         self._lock = threading.Lock()
         self._message_id = 0
@@ -98,8 +115,8 @@ class MessageProtocol:
         self._inbound: Dict[Tuple[bytes, int], _InboundMessage] = {}
         self._delivered: Dict[Tuple[bytes, int], float] = {}
 
-        max_payload = max(_MESSAGE_HEADER_BYTES + 1, max_payload)
-        self._part_payload = max_payload - _MESSAGE_HEADER_BYTES
+        safe_payload = max(_MESSAGE_HEADER_BYTES + 1, resolved_max_payload)
+        self._part_payload = safe_payload - _MESSAGE_HEADER_BYTES
 
     def send_message(self, dst_mac: bytes, text: str) -> bool:
         """Send a text message to the specified destination.

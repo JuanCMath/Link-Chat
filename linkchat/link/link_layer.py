@@ -11,7 +11,7 @@ import threading
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from .af_packet_medium import AFPacketMedium
+from .af_packet_medium_eth_wifi import AFPacketMediumEthWifi
 from .csma_persistent import CSMAPersistent
 from .framing import frame_decode, frame_encode
 
@@ -84,7 +84,7 @@ class LinkLayer:
             sense_timeout: CSMA carrier sense duration in seconds (default: 0.01).
             filter_ethertype: If True, only receive frames with matching ethertype.
         """
-        self.medium = AFPacketMedium(
+        self.medium = AFPacketMediumEthWifi(
             iface=iface,
             ethertype=ethertype,
             filter_ethertype=filter_ethertype,
@@ -191,7 +191,7 @@ class LinkLayer:
             self._rx_thread.join(timeout=1.0)
             self._rx_thread = None
         try:
-            self.medium.sock.close()
+            self.medium.close()
         except Exception:
             pass
 

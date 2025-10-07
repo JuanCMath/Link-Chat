@@ -140,14 +140,6 @@ class LinkChatBackend:
             if self._running:
                 raise RuntimeError("Backend already running")
             
-            # Create medium
-            self._medium = AFPacketMediumEthWifi(
-                iface=self.interface,
-                ethertype=self.ethertype,
-                filter_ethertype=True,
-                enable_promiscuous=False,
-            )
-            
             # Create link layer
             self._link_layer = LinkLayer(
                 iface=self.interface,
@@ -155,6 +147,7 @@ class LinkChatBackend:
                 on_frame=self._on_frame_received,
                 filter_ethertype=True,
             )
+            self._medium = self._link_layer.medium
             
             # Get adaptive parameters for medium
             msg_params = message_params_from_medium(self._medium)
@@ -176,13 +169,11 @@ class LinkChatBackend:
                 download_dir=str(self.download_dir),
                 on_progress=self._on_file_progress_callback,
                 on_complete=self._on_file_complete_callback,
+                chunk_size=file_params.chunk_size,
+                ack_timeout=file_params.ack_timeout,
+                max_retries=file_params.max_retries,
+                inter_chunk_delay=file_params.inter_chunk_delay,
             )
-            
-            # Override file transfer constants with adaptive params
-            from .link import file_transfer
-            file_transfer.CHUNK_SIZE = file_params.chunk_size
-            file_transfer.ACK_TIMEOUT = file_params.ack_timeout
-            file_transfer.MAX_RETRIES = file_params.max_retries
             
             # Start listening for incoming frames
             self._link_layer.start_listening()

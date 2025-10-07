@@ -13,14 +13,15 @@ from typing import Dict, Optional, Callable, Tuple
 from dataclasses import dataclass, field
 
 from .link_layer import LinkLayer, LinkFrame, FrameType
+from .adaptive_params import FileParams, file_params_from_medium
 
 
-# Maximum chunk size in bytes (safe for Ethernet MTU ~1500 bytes minus overhead)
-CHUNK_SIZE = 1400
-# Time in seconds to wait for ACK before considering it lost
-ACK_TIMEOUT = 2.0
-# Maximum number of retransmission attempts per chunk before giving up
-MAX_RETRIES = 5
+_FILE_DEFAULTS = FileParams(
+    chunk_size=1400,
+    ack_timeout=2.0,
+    max_retries=5,
+    inter_chunk_delay=0.0,
+)
 
 
 @dataclass
@@ -58,7 +59,11 @@ class FileTransfer:
         link_layer: LinkLayer,
         download_dir: str = "./downloads",
         on_progress: Optional[Callable[[str, int, int], None]] = None,
-        on_complete: Optional[Callable[[str, bool], None]] = None
+        on_complete: Optional[Callable[[str, bool], None]] = None,
+        chunk_size: Optional[int] = None,
+        ack_timeout: Optional[float] = None,
+        max_retries: Optional[int] = None,
+        inter_chunk_delay: Optional[float] = None,
     ):
         """Initialize the file transfer manager.
         
@@ -73,7 +78,31 @@ class FileTransfer:
                 after each chunk is sent or received to report progress.
             on_complete: Optional callback(filename, success) invoked when a file
                 transfer completes, with success=True if hash matches.
+            chunk_size: Optional override for chunk size in bytes. If None, an
+                adaptive value is derived from the link layer's medium.
+            ack_timeout: Optional override for ACK wait timeout. If None, an
+                adaptive value is derived from the medium.
+            max_retries: Optional override for number of retransmission attempts.
+                If None, an adaptive value is used.
+            inter_chunk_delay: Optional delay between sending chunks to reduce
+                congestion. If None, an adaptive value is used.
         """
+        try:
+            medium = link_layer.medium  # type: ignore[attr-defined]
+        except AttributeError:
+            medium = None
+
+        adaptive_params: FileParams = _FILE_DEFAULTS
+        if medium is not None:
+            adaptive_params = file_params_from_medium(medium)
+
+        self.chunk_size = chunk_size if chunk_size is not None else adaptive_params.chunk_size
+        self.ack_timeout = ack_timeout if ack_timeout is not None else adaptive_params.ack_timeout
+        self.max_retries = max_retries if max_retries is not None else adaptive_params.max_retries
+        self.inter_chunk_delay = (
+            inter_chunk_delay if inter_chunk_delay is not None else adaptive_params.inter_chunk_delay
+        )
+
         self.link_layer = link_layer
         self.download_dir = Path(download_dir)
         self.download_dir.mkdir(parents=True, exist_ok=True)
@@ -93,13 +122,14 @@ class FileTransfer:
         Process:
         1. Computes file metadata (size, total chunks, SHA256 hash).
         2. Sends FILE_META frame with metadata to initialize receiver.
-        3. Reads file in CHUNK_SIZE increments.
+        3. Reads file in adaptive chunk_size increments.
         4. For each chunk, calls _send_chunk_reliable() which:
            - Sends FILE_CHUNK frame
-           - Waits for ACK with timeout
-           - Retries up to MAX_RETRIES times
+           - Waits for ACK using the configured ack_timeout
+           - Retries up to configured max_retries times
         5. Updates progress after each successful chunk.
-        6. Cleans up transfer state in finally block.
+        6. Applies optional inter_chunk_delay to avoid congestion.
+        7. Cleans up transfer state in finally block.
         
         Args:
             dst_mac: Destination MAC address (6 bytes).
@@ -117,7 +147,7 @@ class FileTransfer:
         
         file_size = os.path.getsize(filepath)
         filename = os.path.basename(filepath)
-        total_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
+        total_chunks = (file_size + self.chunk_size - 1) // self.chunk_size
         
         file_hash = self._compute_file_hash(filepath)
         
@@ -136,7 +166,7 @@ class FileTransfer:
             
             with open(filepath, 'rb') as f:
                 for chunk_id in range(total_chunks):
-                    chunk_data = f.read(CHUNK_SIZE)
+                    chunk_data = f.read(self.chunk_size)
                     success = self._send_chunk_reliable(dst_mac, filename, chunk_id, chunk_data)
                     
                     if not success:
@@ -144,9 +174,12 @@ class FileTransfer:
                             self.on_complete(filename, False)
                         return False
                     
-                    bytes_sent = min((chunk_id + 1) * CHUNK_SIZE, file_size)
+                    bytes_sent = min((chunk_id + 1) * self.chunk_size, file_size)
                     if self.on_progress:
                         self.on_progress(filename, bytes_sent, file_size)
+
+                    if self.inter_chunk_delay:
+                        time.sleep(self.inter_chunk_delay)
             
             if self.on_complete:
                 self.on_complete(filename, True)
@@ -159,13 +192,13 @@ class FileTransfer:
     def _send_chunk_reliable(self, dst_mac: bytes, filename: str, chunk_id: int, data: bytes) -> bool:
         """Send a single chunk with retransmission logic.
 
-        Implements reliable transmission using ACKs and retries:
-        1. Creates a threading.Event keyed by (dst_mac, filename, chunk_id).
-        2. Sends FILE_CHUNK frame with payload: chunk_id(4 bytes) + filename + '|' + data.
-        3. Waits for ACK with ACK_TIMEOUT (2 seconds).
-        4. If ACK received, returns True.
-        5. If timeout, retries up to MAX_RETRIES (5) times.
-        6. Returns False if all retries exhausted.
+    Implements reliable transmission using ACKs and retries:
+    1. Creates a threading.Event keyed by (dst_mac, filename, chunk_id).
+    2. Sends FILE_CHUNK frame with payload: chunk_id(4 bytes) + filename + '|' + data.
+    3. Waits for ACK using the configured ack_timeout.
+    4. If ACK received, returns True.
+    5. If timeout, retries up to the configured max_retries.
+    6. Returns False if all retries exhausted.
 
         The ACK is received asynchronously in _handle_ack() which sets the Event,
         unblocking the wait() call.
@@ -174,28 +207,28 @@ class FileTransfer:
             dst_mac: Destination MAC address (6 bytes).
             filename: Name of file being sent (for payload identification).
             chunk_id: Chunk sequence number (0 to total_chunks-1).
-            data: Chunk data bytes (up to CHUNK_SIZE).
+            data: Chunk data bytes (up to configured chunk_size).
 
         Returns:
             True if chunk was acknowledged within timeout, False after max retries.
         """
         payload = chunk_id.to_bytes(4, 'big') + filename.encode('utf-8') + b'|' + data
         ack_key = (dst_mac, filename, chunk_id)
-        
-        for attempt in range(MAX_RETRIES):
+
+        for attempt in range(self.max_retries):
             with self._lock:
                 self._ack_events[ack_key] = threading.Event()
-            
+
             self.link_layer.send(dst_mac, FrameType.FILE_CHUNK, payload)
-            
-            ack_received = self._ack_events[ack_key].wait(timeout=ACK_TIMEOUT)
-            
+
+            ack_received = self._ack_events[ack_key].wait(timeout=self.ack_timeout)
+
             with self._lock:
                 self._ack_events.pop(ack_key, None)
-            
+
             if ack_received:
                 return True
-        
+
         return False
     
     def handle_received_frame(self, frame: LinkFrame):
