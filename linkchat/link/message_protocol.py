@@ -9,9 +9,6 @@ The protocol uses MESSAGE frames for data transmission and ACK frames for
 confirmation. Each message is assigned a unique ID and can be fragmented across
 multiple parts if it exceeds the configured payload size.
 """
-
-from __future__ import annotations
-
 import threading
 import time
 from dataclasses import dataclass, field
@@ -31,6 +28,8 @@ _MESSAGE_ACK_TIMEOUT = 2.0
 _MESSAGE_MAX_RETRIES = 5
 # Delay between sending message parts to avoid overwhelming the medium
 _MESSAGE_INTER_PART_DELAY = 0.005
+# Size of the acknowlegment message: Prefix (1 byte) + message_id (2 bytes)
+_MESSAGE_ACK_SIZE = 3
 
 
 @dataclass
@@ -231,7 +230,8 @@ class MessageProtocol:
                 state.parts[part_index] = part_data
             elif state.parts[part_index] != part_data:
                 state.parts[part_index] = part_data
-
+            
+            # Checks if the message is complete
             if len(state.parts) != state.total_parts:
                 return
 
@@ -261,10 +261,10 @@ class MessageProtocol:
             frame: Received ACK frame with message acknowledgment.
         """
         payload = frame.payload
-        if len(payload) < 3 or payload[0] != _MESSAGE_ACK_PREFIX:
+        if len(payload) < _MESSAGE_ACK_SIZE or payload[0] != _MESSAGE_ACK_PREFIX:
             return
 
-        message_id = int.from_bytes(payload[1:3], "big")
+        message_id = int.from_bytes(payload[1:_MESSAGE_ACK_SIZE], "big")
         key = (frame.src, message_id)
 
         with self._lock:
