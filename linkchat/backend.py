@@ -259,6 +259,33 @@ class LinkChatBackend:
             raise RuntimeError("Backend not running")
         
         return self._file_transfer.send_file(dst_mac, filepath)
+
+    def send_folder(self, dst_mac: bytes, folder_path: str) -> bool:
+        """Send a complete folder to destination MAC address.
+        
+        Sends an entire directory tree by:
+        1. Sending TRANSFER_META frame with JSON metadata listing all files.
+        2. Waiting for metadata ACK confirmation from receiver.
+        3. Sequentially sending each file via FileTransfer with virtual paths.
+        
+        The receiver reconstructs the directory structure based on metadata
+        before files arrive, ensuring proper hierarchy preservation. Metadata
+        ACK ensures the receiver is ready before file transmission begins.
+        
+        Args:
+            dst_mac: Destination MAC address (6 bytes).
+            folder_path: Path to the folder to send.
+        
+        Returns:
+            True if all files were successfully transferred, False on any failure.
+        
+        Raises:
+            RuntimeError: If backend not running.
+            NotADirectoryError: If folder_path is not a directory.
+        """
+        if not self._running or not self._file_transfer:
+            raise RuntimeError("Backend not running")
+        return self._file_transfer.send_folder(dst_mac, folder_path)
     
     def get_network_info(self) -> Dict[str, Any]:
         """Get current network configuration and status.
@@ -284,12 +311,25 @@ class LinkChatBackend:
         
         Called by LinkLayer when a frame is received. Dispatches to
         MessageProtocol or FileTransfer based on frame type.
+        
+        Frame routing logic:
+        - MESSAGE frames: Routed to MessageProtocol for reassembly.
+        - ACK frames: Routed to BOTH MessageProtocol AND FileTransfer since
+          both protocols use ACKs with different payload formats. Each handler
+          validates the ACK format and ignores irrelevant ACKs.
+        - TRANSFER_META, FILE_CHUNK frames: Routed to FileTransfer for file/folder reception.
         """
-        if frame.typ == FrameType.MESSAGE or frame.typ == FrameType.ACK:
+        if frame.typ == FrameType.MESSAGE:
             if self._message_protocol:
                 self._message_protocol.handle_frame(frame)
-        
-        elif frame.typ in (FrameType.FILE_META, FrameType.FILE_CHUNK):
+        elif frame.typ == FrameType.ACK:
+            # ACK frames must be routed to both message and file protocols
+            # since both use ACKs with different payload formats
+            if self._message_protocol:
+                self._message_protocol.handle_frame(frame)
+            if self._file_transfer:
+                self._file_transfer.handle_received_frame(frame)
+        elif frame.typ in (FrameType.TRANSFER_META, FrameType.FILE_CHUNK):
             if self._file_transfer:
                 self._file_transfer.handle_received_frame(frame)
     

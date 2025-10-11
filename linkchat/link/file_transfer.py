@@ -1,19 +1,21 @@
-"""File transfer module for sending and receiving files of any size.
+"""File and folder transfer module for sending and receiving transfers of any size.
 
-Implements chunking, reassembly, ACK/retransmission, and progress tracking
-for reliable file transfers over the link layer.
+Implements chunking, reassembly, and progress tracking for reliable file and 
+folder transfers over the link layer. Coordinates metadata handling and 
+reliability layers to provide a complete transfer solution.
 """
 
 import os
 import time
 import hashlib
-import threading
 from pathlib import Path, PurePosixPath
-from typing import Dict, Optional, Callable, Tuple
+from typing import Dict, Optional, Callable, Tuple, List
 from dataclasses import dataclass, field
 
 from .link_layer import LinkLayer, LinkFrame, FrameType
 from .adaptive_params import FileParams, file_params_from_medium
+from .transfer_metadata import TransferMetadata, ACKPayload
+from .transfer_reliability import ReliableTransfer
 
 
 _FILE_DEFAULTS = FileParams(
@@ -110,32 +112,37 @@ class FileTransfer:
         self.on_progress = on_progress
         self.on_complete = on_complete
         
+        # Initialize reliability layer for ACK/retry handling
+        self._reliable = ReliableTransfer(
+            link_layer=link_layer,
+            ack_timeout=self.ack_timeout,
+            max_retries=self.max_retries
+        )
+        
         self.active_sends: Dict[Tuple[bytes, str], FileTransferState] = {}
         self.active_receives: Dict[Tuple[bytes, str], FileTransferState] = {}
-        
-        self._ack_events: Dict[Tuple[bytes, str, int], threading.Event] = {}
-        self._lock = threading.Lock()
     
     def send_file(self, dst_mac: bytes, filepath: str, virtual_path: Optional[str] = None) -> bool:
         """Send a file to the specified destination.
         
         Process:
         1. Computes file metadata (size, total chunks, SHA256 hash).
-        2. Sends FILE_META frame with metadata to initialize receiver.
-        3. Reads file in adaptive chunk_size increments.
-        4. For each chunk, calls _send_chunk_reliable() which:
+        2. Sends TRANSFER_META frame with JSON metadata to initialize receiver.
+        3. Waits for metadata ACK confirmation before proceeding.
+        4. Reads file in adaptive chunk_size increments.
+        5. For each chunk, calls _send_chunk_reliable() which:
            - Sends FILE_CHUNK frame
            - Waits for ACK using the configured ack_timeout
            - Retries up to configured max_retries times
-        5. Updates progress after each successful chunk.
-        6. Applies optional inter_chunk_delay to avoid congestion.
-        7. Cleans up transfer state in finally block.
+        6. Updates progress after each successful chunk.
+        7. Applies optional inter_chunk_delay to avoid congestion.
+        8. Cleans up transfer state in finally block.
         
         Args:
             dst_mac: Destination MAC address (6 bytes).
             filepath: Path to the file to send.
             virtual_path: Optional relative path advertised to receiver instead of
-                the actual filename. Used by FolderTransfer to preserve directory
+                the actual filename. Used by send_folder to preserve directory
                 structure (e.g., "MyFolder/subdir/file.txt").
         
         Returns:
@@ -163,14 +170,28 @@ class FileTransfer:
         )
         
         try:
-            meta_payload = f"{transfer_name}|{file_size}|{total_chunks}|{file_hash}".encode('utf-8')
-            self.link_layer.send(dst_mac, FrameType.FILE_META, meta_payload)
+            # Build unified JSON metadata for file transfer
+            meta_payload = TransferMetadata.build_file_metadata(
+                name=transfer_name,
+                size=file_size,
+                chunks=total_chunks,
+                file_hash=file_hash
+            )
+            
+            # Send metadata and wait for ACK
+            if not self._reliable.send_metadata_reliable(dst_mac, transfer_name, meta_payload):
+                if self.on_complete:
+                    self.on_complete(transfer_name, False)
+                return False
+            
             time.sleep(0.1)
             
             with open(filepath, 'rb') as f:
                 for chunk_id in range(total_chunks):
                     chunk_data = f.read(self.chunk_size)
-                    success = self._send_chunk_reliable(dst_mac, transfer_name, chunk_id, chunk_data)
+                    success = self._reliable.send_chunk_reliable(
+                        dst_mac, transfer_name, chunk_id, chunk_data
+                    )
                     
                     if not success:
                         if self.on_complete:
@@ -189,69 +210,84 @@ class FileTransfer:
             return True
             
         finally:
-            with self._lock:
-                self.active_sends.pop(transfer_key, None)
+            self.active_sends.pop(transfer_key, None)
     
-    def _send_chunk_reliable(self, dst_mac: bytes, filename: str, chunk_id: int, data: bytes) -> bool:
-        """Send a single chunk with retransmission logic.
-
-        Implements reliable transmission using ACKs and retries:
-        1. Creates a threading.Event keyed by (dst_mac, filename, chunk_id).
-        2. Sends FILE_CHUNK frame with payload: chunk_id(4 bytes) + filename + '|' + data.
-        3. Waits for ACK using the configured ack_timeout.
-        4. If ACK received, returns True.
-        5. If timeout, retries up to the configured max_retries.
-        6. Returns False if all retries exhausted.
-
-        The ACK is received asynchronously in _handle_ack() which sets the Event,
-        unblocking the wait() call. The filename is included in the ACK key to ensure
-        ACKs for different files (even with the same chunk_id) are properly isolated,
-        preventing cross-file ACK interference when multiple files are in flight.
-
+    def send_folder(self, dst_mac: bytes, folder_path: str) -> bool:
+        """Send a complete folder with all its contents to the destination.
+        
+        Process:
+        1. Validates folder exists and recursively collects all files.
+        2. Constructs JSON metadata: {"type": "folder", "root": folder_name, "files": [{path, size}, ...]}.
+        3. Sends TRANSFER_META frame with metadata and waits for ACK.
+        4. Sends each file individually using send_file() with virtual_path to preserve hierarchy.
+        5. Returns True if folder is empty (no files to transfer).
+        
+        The unified metadata approach ensures the receiver can prepare the directory
+        structure before any files arrive, with reliable ACK confirmation that the
+        metadata was received. Each file is then sent with its own metadata and ACKs,
+        providing full end-to-end reliability for the entire folder transfer.
+        
         Args:
             dst_mac: Destination MAC address (6 bytes).
-            filename: Name of file being sent (for payload identification and ACK isolation).
-            chunk_id: Chunk sequence number (0 to total_chunks-1).
-            data: Chunk data bytes (up to configured chunk_size).
-
+            folder_path: Path to the folder to send.
+        
         Returns:
-            True if chunk was acknowledged within timeout, False after max retries.
+            True if all files were successfully transferred, False if any file failed.
+        
+        Raises:
+            NotADirectoryError: If folder_path is not a directory.
+            ValueError: If the folder name cannot be sanitized (empty after cleanup).
         """
-        payload = chunk_id.to_bytes(4, 'big') + filename.encode('utf-8') + b'|' + data
-        ack_key = (dst_mac, filename, chunk_id)
-
-        for attempt in range(self.max_retries):
-            with self._lock:
-                self._ack_events[ack_key] = threading.Event()
-
-            self.link_layer.send(dst_mac, FrameType.FILE_CHUNK, payload)
-
-            ack_received = self._ack_events[ack_key].wait(timeout=self.ack_timeout)
-
-            with self._lock:
-                self._ack_events.pop(ack_key, None)
-
-            if ack_received:
-                return True
-
-        return False
+        base = Path(folder_path)
+        if not base.is_dir():
+            raise NotADirectoryError(f"Folder not found: {folder_path}")
+        
+        # Collect all files recursively
+        files = self._collect_files(base)
+        
+        # Sanitize root folder name
+        root_token = self._sanitize_transfer_name(base.name)
+        if not root_token:
+            raise ValueError("Folder name cannot be empty")
+        
+        # Build unified JSON metadata for folder transfer
+        meta_payload = TransferMetadata.build_folder_metadata(root_token, files)
+        
+        # Send metadata and wait for ACK
+        if not self._reliable.send_metadata_reliable(dst_mac, root_token, meta_payload):
+            return False
+        
+        # If no files, transfer is complete
+        if not files:
+            return True
+        
+        # Send each file with virtual path to preserve structure
+        success = True
+        for rel_path, _ in files:
+            virtual_path = f"{root_token}/{rel_path}" if rel_path else root_token
+            full_path = base / Path(rel_path)
+            if not self.send_file(dst_mac, str(full_path), virtual_path=virtual_path):
+                success = False
+                break
+        
+        return success
     
     def handle_received_frame(self, frame: LinkFrame):
-        """Process incoming frames related to file transfers.
+        """Process incoming frames related to file and folder transfers.
         
         Routes frames to appropriate handlers based on frame type:
-        - FILE_META: Initializes new file reception state.
+        - TRANSFER_META: Initializes new file or folder reception state.
         - FILE_CHUNK: Stores chunk and sends ACK.
-        - ACK: Signals waiting send thread that chunk was received.
+        - ACK: Signals waiting send thread that chunk or metadata was received.
         
         This method should be called from the link layer's on_frame callback
-        to handle all file transfer protocol frames.
+        to handle all transfer protocol frames.
         
         Args:
             frame: Received LinkFrame to process.
         """
-        if frame.typ == FrameType.FILE_META:
-            self._handle_file_meta(frame)
+        if frame.typ == FrameType.TRANSFER_META:
+            self._handle_transfer_meta(frame)
         
         elif frame.typ == FrameType.FILE_CHUNK:
             self._handle_file_chunk(frame)
@@ -259,40 +295,119 @@ class FileTransfer:
         elif frame.typ == FrameType.ACK:
             self._handle_ack(frame)
     
-    def _handle_file_meta(self, frame: LinkFrame):
-        """Handle FILE_META frame to initialize a new file reception.
+    def _handle_transfer_meta(self, frame: LinkFrame):
+        """Handle TRANSFER_META frame to initialize a new transfer reception.
         
-        Parses the metadata payload format: "filename|size|chunks|hash"
-        and creates a FileTransferState entry in active_receives to track
-        incoming chunks. This must be received before any FILE_CHUNK frames.
+        Parses the JSON metadata payload which can represent either:
+        - File transfer: {"type": "file", "name": ..., "size": ..., "chunks": ..., "hash": ...}
+        - Folder transfer: {"type": "folder", "root": ..., "files": [{path, size}, ...]}
         
-        The filename is now sanitized to prevent directory traversal attacks
-        and ensure safe file creation on the receiver side. If virtual_path
-        was used by the sender (e.g., for folder transfers), it is preserved
-        as the transfer_name to maintain directory structure.
+        For file transfers:
+        - Creates FileTransferState entry in active_receives to track incoming chunks.
+        - Sanitizes filename to prevent directory traversal attacks.
+        - Sends ACK to confirm metadata receipt.
+        
+        For folder transfers:
+        - Creates root directory and all subdirectories based on files list.
+        - Sends ACK to confirm metadata receipt.
+        - Actual files will arrive as individual file transfers with virtual paths.
         
         Args:
-            frame: Received metadata frame with FILE_META type.
+            frame: Received metadata frame with TRANSFER_META type.
         """
-        try:
-            parts = frame.payload.decode('utf-8').split('|')
-            if len(parts) != 4:
-                raise ValueError("FILE_META payload must contain filename|size|chunks|hash")
-            filename_raw, size_str, chunks_str, file_hash = parts
-            transfer_name = self._sanitize_transfer_name(filename_raw)
-            if not transfer_name:
-                fallback_name = Path(filename_raw).name
-                sanitized_fallback = self._sanitize_transfer_name(fallback_name)
-                transfer_name = sanitized_fallback if sanitized_fallback else fallback_name
-            transfer_key = (frame.src, transfer_name)
-            self.active_receives[transfer_key] = FileTransferState(
-                filename=transfer_name,
-                total_size=int(size_str),
-                total_chunks=int(chunks_str),
-                file_hash=file_hash
-            )
-        except (ValueError, UnicodeDecodeError) as e:
-            print(f"Invalid FILE_META: {e}")
+        data = TransferMetadata.parse_metadata(frame.payload)
+        if data is None:
+            print("Invalid TRANSFER_META: failed to parse JSON")
+            return
+        
+        transfer_type = data.get("type")
+        
+        if transfer_type == "file":
+            self._handle_file_metadata(frame, data)
+        elif transfer_type == "folder":
+            self._handle_folder_metadata(frame, data)
+        else:
+            print(f"Unknown transfer type: {transfer_type}")
+    
+    def _handle_file_metadata(self, frame: LinkFrame, data: dict):
+        """Handle file-specific metadata from TRANSFER_META frame.
+        
+        Extracts file metadata and prepares for chunk reception.
+        
+        Args:
+            frame: Received frame containing the metadata.
+            data: Parsed JSON dictionary with file metadata.
+        """
+        filename_raw = data.get("name", "")
+        size_val = data.get("size", 0)
+        chunks_val = data.get("chunks", 0)
+        hash_val = data.get("hash", "")
+        
+        if not all([filename_raw, isinstance(size_val, int), isinstance(chunks_val, int), hash_val]):
+            print("Invalid file metadata: missing required fields")
+            return
+        
+        transfer_name = self._sanitize_transfer_name(filename_raw)
+        if not transfer_name:
+            fallback_name = Path(filename_raw).name
+            sanitized_fallback = self._sanitize_transfer_name(fallback_name)
+            transfer_name = sanitized_fallback if sanitized_fallback else fallback_name
+        
+        transfer_key = (frame.src, transfer_name)
+        self.active_receives[transfer_key] = FileTransferState(
+            filename=transfer_name,
+            total_size=size_val,
+            total_chunks=chunks_val,
+            file_hash=hash_val
+        )
+        
+        # Send metadata ACK
+        ack_payload = ACKPayload.build_metadata_ack(transfer_name)
+        self.link_layer.send(frame.src, FrameType.ACK, ack_payload)
+    
+    def _handle_folder_metadata(self, frame: LinkFrame, data: dict):
+        """Handle folder-specific metadata from TRANSFER_META frame.
+        
+        Creates the complete directory structure based on the files list
+        in the metadata. Individual files will arrive as separate file transfers.
+        
+        Args:
+            frame: Received frame containing the metadata.
+            data: Parsed JSON dictionary with folder metadata.
+        """
+        root_value = data.get("root")
+        files_value = data.get("files", [])
+        
+        if not isinstance(root_value, str):
+            print("Invalid folder metadata: root must be a string")
+            return
+        
+        root_token = self._sanitize_transfer_name(root_value)
+        if not root_token:
+            print("Invalid folder metadata: root name cannot be empty")
+            return
+        
+        # Create root directory
+        base_path = self.download_dir / root_token
+        base_path.mkdir(parents=True, exist_ok=True)
+        
+        # Create all subdirectories based on files list
+        for entry in files_value:
+            if not isinstance(entry, dict):
+                continue
+            rel_value = entry.get("path")
+            if not isinstance(rel_value, str):
+                continue
+            sanitized = self._sanitize_transfer_name(rel_value)
+            if not sanitized:
+                continue
+            # Create parent directory for this file
+            file_path = base_path / sanitized
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Send metadata ACK
+        ack_payload = ACKPayload.build_metadata_ack(root_token)
+        self.link_layer.send(frame.src, FrameType.ACK, ack_payload)
     
     def _handle_file_chunk(self, frame: LinkFrame):
         """Handle FILE_CHUNK frame and send ACK.
@@ -350,7 +465,8 @@ class FileTransfer:
                         transfer.received_size += delta
                         progress_refresh_needed = True
             
-            ack_payload = chunk_id.to_bytes(4, 'big') + transfer.filename.encode('utf-8')
+            # Send chunk ACK
+            ack_payload = ACKPayload.build_chunk_ack(chunk_id, transfer.filename)
             self.link_layer.send(frame.src, FrameType.ACK, ack_payload)
             
             if self.on_progress and (is_new_chunk or progress_refresh_needed):
@@ -363,32 +479,20 @@ class FileTransfer:
             print(f"Invalid FILE_CHUNK: {e}")
     
     def _handle_ack(self, frame: LinkFrame):
-        """Handle ACK frame to signal chunk receipt.
+        """Handle ACK frame to signal chunk or metadata receipt.
         
-        Extracts the chunk_id and filename from the ACK payload and sets the
-        corresponding threading.Event to unblock the waiting send thread in
-        _send_chunk_reliable(). This allows the sender to proceed to the next chunk
-        even when multiple files are in flight to the same destination.
-        
-        The filename is included in the ACK key (dst_mac, filename, chunk_id) to
-        ensure file-specific ACK isolation. Without this, an ACK for "file1.txt"
-        chunk 0 could incorrectly unblock a waiting thread for "file2.txt" chunk 0,
-        causing premature transmission failures or data corruption.
+        Parses ACK payload and signals the reliability layer to unblock
+        waiting send threads. Supports both metadata ACKs and chunk ACKs.
         
         Args:
-            frame: Received ACK frame with chunk acknowledgment.
+            frame: Received ACK frame with acknowledgment.
         """
-        try:
-            chunk_id = int.from_bytes(frame.payload[:4], 'big')
-            filename = frame.payload[4:].decode('utf-8') if len(frame.payload) > 4 else ""
-            ack_key = (frame.src, filename, chunk_id)
-            
-            with self._lock:
-                if ack_key in self._ack_events:
-                    self._ack_events[ack_key].set()
+        parsed = ACKPayload.parse_ack(frame.payload)
+        if parsed is None:
+            return
         
-        except (ValueError, UnicodeDecodeError):
-            pass
+        identifier, chunk_id_or_meta = parsed
+        self._reliable.signal_ack(frame.src, identifier, chunk_id_or_meta)
     
     def _finalize_file_reception(self, src_mac: bytes, filename: str):
         """Reassemble chunks and save the complete file.
@@ -397,7 +501,7 @@ class FileTransfer:
         1. Sorts chunks by chunk_id to ensure correct order.
         2. Writes chunks sequentially to reconstruct the file.
         3. Computes SHA256 hash of reconstructed file.
-        4. Compares with hash from FILE_META to verify integrity.
+        4. Compares with hash from TRANSFER_META to verify integrity.
         5. Invokes on_complete callback with success status.
         6. Cleans up transfer state.
         
@@ -498,7 +602,7 @@ class FileTransfer:
         creates parent directories as needed.
         
         Args:
-            transfer_name: Sanitized transfer name from FILE_META.
+            transfer_name: Sanitized transfer name from TRANSFER_META.
         
         Returns:
             Absolute path where the file should be saved.
@@ -513,3 +617,27 @@ class FileTransfer:
             raise ValueError("Invalid transfer path")
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
+    
+    def _collect_files(self, base: Path) -> List[Tuple[str, int]]:
+        """Recursively collect all files in a directory tree.
+        
+        Scans the directory recursively and builds a list of all files with
+        their relative paths and sizes. Paths are sanitized to prevent directory
+        traversal attacks and normalized to POSIX-style forward slashes for
+        cross-platform compatibility.
+        
+        Args:
+            base: Root directory to scan.
+        
+        Returns:
+            List of (relative_path, file_size) tuples for all files in the tree.
+            Relative paths use forward slashes and are sanitized.
+        """
+        collected: List[Tuple[str, int]] = []
+        for path in sorted(base.rglob("*")):
+            if path.is_file():
+                rel = path.relative_to(base).as_posix()
+                sanitized = self._sanitize_transfer_name(rel)
+                if sanitized:
+                    collected.append((sanitized, path.stat().st_size))
+        return collected
