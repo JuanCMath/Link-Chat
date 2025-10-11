@@ -3,6 +3,7 @@ Run with: python -m linkchat.app.qt_main
 """
 import logging
 import sys
+import os
 
 from PyQt6.QtWidgets import QApplication
 
@@ -37,12 +38,26 @@ def run() -> int:
     then enters the Qt event loop. Returns the application's exit code
     when the event loop terminates.
     """
+    # Force XCB platform for proper X11 display (prevents offscreen rendering)
+    os.environ.setdefault('QT_QPA_PLATFORM', 'xcb')
+    
+    # Suppress Qt platform plugin warnings
+    os.environ.setdefault('QT_LOGGING_RULES', '*.debug=false;qt.qpa.*=false')
+    
     # Configure logging before anything else
     setup_logging()
+    
+    logger = logging.getLogger(__name__)
+    logger.info("Starting LinkChat GUI application...")
     
     app = QApplication(sys.argv)
     win = MainWindow()
     win.show()
+
+    # Force window to front
+    win.raise_()
+    win.activateWindow()
+    logger.info("GUI window displayed - entering event loop")
     return app.exec()
 
 
