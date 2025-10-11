@@ -1,0 +1,16 @@
+Metadata-Version: 2.4
+Name: linkchat
+Version: 0.1.0
+Summary: LinkChat: Mensajería en capa de enlace con GUI PyQt6
+Author-email: Tu Nombre <you@example.com>
+License-Expression: MIT
+Keywords: networking,link-layer,chat,pyqt6
+Classifier: Programming Language :: Python :: 3
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Communications :: Chat
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Provides-Extra: gui
+Requires-Dist: PyQt6>=6.6; extra == "gui"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"

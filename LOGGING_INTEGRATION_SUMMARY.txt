@@ -1,0 +1,219 @@
+"""
+═══════════════════════════════════════════════════════════════════════════
+    LOGGING WINDOW INTEGRATION - COMPLETE SUMMARY
+═══════════════════════════════════════════════════════════════════════════
+
+✅ LOG VIEWER SUCCESSFULLY ADDED TO GUI!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📁 CHANGES MADE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. ✅ main_window.py - MODIFIED
+   ├─ Added imports:
+   │  ├─ import logging
+   │  ├─ from PyQt6.QtWidgets import QTabWidget
+   │  └─ from .log_handler import LogViewer, setup_gui_logging
+   │
+   ├─ Modified _build_ui():
+   │  ├─ Changed single chat panel → tabbed interface
+   │  ├─ Tab 1: "💬 Chat" (existing ChatPanel)
+   │  └─ Tab 2: "📋 Logs" (new LogViewer)
+   │
+   ├─ Added _setup_logging() method:
+   │  ├─ Configures GUI logging handler
+   │  ├─ Sets log level to DEBUG
+   │  └─ Logs startup message
+   │
+   └─ Modified __init__():
+      └─ Calls _setup_logging() after _build_ui()
+
+2. ✅ log_handler.py - CREATED
+   ├─ QtLogHandler class
+   │  ├─ Custom logging.Handler
+   │  ├─ Emits Qt signals for thread safety
+   │  └─ Bridges Python logging → Qt GUI
+   │
+   ├─ LogViewer class (QTextEdit)
+   │  ├─ Color-coded log display
+   │  ├─ Auto-scrolling
+   │  └─ 1000 line limit
+   │
+   └─ setup_gui_logging() function
+      └─ Configures root logger with GUI handler
+
+3. ✅ qt_main.py - MODIFIED
+   └─ Added setup_logging() function
+      └─ Configures console logging at startup
+
+4. ✅ test_logging.py - CREATED
+   └─ Standalone test to verify logging works
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎨 HOW IT LOOKS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌─────────────────────────────────────────────────────────────────┐
+│ LinkChat - PyQt6                                      [_][□][X] │
+├─────────────────────────────────────────────────────────────────┤
+│ Toolbar: [Enviar carpeta] │ [Acerca de] [Salir]                │
+├─────────────────┬───────────────────────────────────────────────┤
+│ Peer List       │  [💬 Chat]  [📋 Logs]                         │
+│ ┌─────────────┐ │ ┌─────────────────────────────────────────┐  │
+│ │ Juan (aa:bb)│ │ │ 14:23:45 - linkchat.backend - INFO -    │  │
+│ │ Maria (cc..)│ │ │            Connected to interface eth0  │  │
+│ │             │ │ │                                         │  │
+│ │             │ │ │ 14:23:47 - linkchat.link.file_transfer  │  │
+│ │             │ │ │            - WARNING - Retrying chunk 5 │  │
+│ │             │ │ │                                         │  │
+│ │             │ │ │ 14:23:50 - linkchat.link.file_transfer  │  │
+│ │             │ │ │            - ERROR - Hash mismatch!     │  │
+│ ├─────────────┤ │ │                                         │  │
+│ │[Conectar…]  │ │ │ Messages appear in real-time with       │  │
+│ │[Desconectar]│ │ │ color coding:                           │  │
+│ └─────────────┘ │ │ • DEBUG: Gray                           │  │
+│                 │ │ • INFO: Black                           │  │
+│                 │ │ • WARNING: Orange                       │  │
+│                 │ │ • ERROR/CRITICAL: Red                   │  │
+│                 │ └─────────────────────────────────────────┘  │
+├─────────────────┴───────────────────────────────────────────────┤
+│ Status: Ready                                                   │
+└─────────────────────────────────────────────────────────────────┘
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔄 HOW IT WORKS - COMPLETE FLOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. App Startup (qt_main.py)
+   └─> setup_logging() → Configures console logging
+   └─> MainWindow() created
+       └─> _build_ui() → Creates log_viewer widget
+       └─> _setup_logging() → Configures GUI logging
+           └─> setup_gui_logging(log_viewer)
+               ├─ Creates QtLogHandler
+               ├─ Adds handler to root logger
+               └─ Connects signal: handler → log_viewer
+
+2. Backend Operation (e.g., file_transfer.py)
+   logger.error("Hash mismatch for %s!", filename)
+   │
+   ├─> Python logging system checks level
+   ├─> Formats message with timestamp
+   └─> Sends to ALL handlers:
+       │
+       ├─> StreamHandler → Terminal
+       │   └─> Prints: "14:23:50 - linkchat.link.file_transfer - ERROR - Hash mismatch!"
+       │
+       └─> QtLogHandler → GUI
+           └─> emit(record)
+               └─> log_signal.emit(level, msg)
+                   └─> log_viewer.append_log(level, msg)
+                       ├─ Sets text color (RED for ERROR)
+                       ├─ Appends message
+                       └─ Auto-scrolls to bottom
+
+3. User sees log in BOTH places:
+   ✅ Terminal/Console
+   ✅ GUI "Logs" tab
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 WHAT YOU CAN DO NOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Run the app normally:
+   python -m linkchat.app.qt_main
+   
+   → All backend errors/warnings automatically appear in Logs tab!
+   → No code changes needed in backend files
+   → Switch between Chat and Logs tabs anytime
+
+✅ Test the logging system:
+   python test_logging.py
+   
+   → Opens test window
+   → Click "Run Logging Test" button
+   → See logs appear in real-time with colors
+
+✅ Monitor network activity:
+   → Click "Logs" tab while using the app
+   → See real-time events:
+     • Peer discoveries
+     • Message sends/receives
+     • File transfer progress
+     • Errors and warnings
+     • Connection status
+
+✅ Debug issues:
+   → Logs show exact timestamp
+   → Module name identifies source
+   → Color indicates severity
+   → Last 1000 messages kept
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 LOGGING LEVELS & COLORS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Level      | Color      | When to use
+-----------|------------|------------------------------------------
+DEBUG      | Gray       | Detailed diagnostic info
+INFO       | Black      | Normal operation events
+WARNING    | Orange     | Something unexpected but handled
+ERROR      | Red        | Actual errors that need attention
+CRITICAL   | Dark Red   | Severe errors, app may crash
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 KEY BENEFITS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ No backend changes needed
+   → file_transfer.py already has logger.error() calls
+   → They automatically appear in GUI now!
+
+✅ Thread-safe
+   → Backend runs in threads
+   → Qt signals ensure safe GUI updates
+   → No race conditions
+
+✅ Automatic routing
+   → ALL modules' logs appear in one place
+   → No manual wiring needed
+   → Hierarchical logger names
+
+✅ Better debugging
+   → See exactly what's happening
+   → No need to check terminal
+   → Color coding for quick scanning
+
+✅ User-friendly
+   → Non-technical users can copy logs
+   → Easy to report issues
+   → Professional appearance
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 EXAMPLE LOG OUTPUT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+14:23:40 - linkchat.app.gui.main_window - INFO - LinkChat GUI initialized
+14:23:42 - linkchat.backend - INFO - Starting backend on interface eth0
+14:23:42 - linkchat.link.peer_discovery - INFO - Discovery service started
+14:23:45 - linkchat.link.peer_discovery - INFO - Found peer: Juan (aa:bb:cc:dd:ee:ff)
+14:23:50 - linkchat.link.message_protocol - INFO - Message sent to aa:bb:cc:dd:ee:ff
+14:24:10 - linkchat.link.file_transfer - INFO - Starting file transfer: photo.jpg
+14:24:12 - linkchat.link.file_transfer - WARNING - Retrying chunk 5/50
+14:24:15 - linkchat.link.file_transfer - ERROR - Hash mismatch for photo.jpg!
+14:24:15 - linkchat.link.file_transfer - INFO - File transfer failed
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ INTEGRATION COMPLETE!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Your GUI now has:
+✅ Dual-output logging (console + GUI)
+✅ Color-coded severity levels
+✅ Thread-safe operation
+✅ Auto-scrolling log viewer
+✅ No backend code changes required
+✅ Professional debugging interface
+
+The logging system is fully integrated and ready to use! 🎉
+"""
