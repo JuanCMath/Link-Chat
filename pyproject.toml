@@ -2,48 +2,35 @@
 name = "linkchat"
 version = "0.1.0"
 description = "LinkChat: Mensajería en capa de enlace con GUI PyQt6"
-authors = [ { name = "Tu Nombre", email = "you@example.com" } ]
 readme = "README.md"
-license = "MIT"  # SPDX expression (avoid deprecated table form)
 requires-python = ">=3.11"
 keywords = ["networking", "link-layer", "chat", "pyqt6"]
-classifiers = [
-  "Programming Language :: Python :: 3",
-  "Intended Audience :: Developers",
-  "Topic :: Communications :: Chat",
-]
-
-# Núcleo aún sin dependencias externas
+# Dependencias núcleo (ninguna externa por ahora)
 dependencies = []
 
 [project.optional-dependencies]
-# uv sync --extra gui --extra dev
+# Instalar con: uv add .[gui]
+# o: uv sync --extra gui
 gui = [
   "PyQt6>=6.6"
 ]
+# Desarrollo
 dev = [
   "pytest>=8.0"
 ]
 
 [project.scripts]
-linkchat = "linkchat.main:main"
+# Ejecutar la GUI: uv run linkchat-gui
 linkchat-gui = "linkchat.app.qt_main:run"
 
 [build-system]
 requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
-# Evitar que setuptools incluya carpetas ajenas (Req, tests, docker)
-[tool.setuptools]
-# futuro: incluir package-data si hace falta
-
 [tool.setuptools.packages.find]
 include = ["linkchat*"]
 exclude = ["tests*", "Req*", "docker*"]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
 addopts = "-q"
-
-[tool.uv]
-# Placeholder para configuraciones futuras
+pythonpath = ["."]
