@@ -1,0 +1,6 @@
+
+[dev]
+pytest>=8.0
+
+[gui]
+PyQt6>=6.6

@@ -1,0 +1,30 @@
+# Alpine-based interactive image using pre-built base
+# For development and debugging with full GUI support
+#
+# First build the base image:
+#   docker build -f docker/base/Dockerfile.base.alpine -t linkchat-base-alpine:latest .
+#
+# Then build this image:
+#   docker build -f docker/testing/Dockerfile.interactive.alpine -t linkchat-interactive-alpine .
+#
+# Run:
+#   docker run -it --rm linkchat-interactive-alpine /bin/bash
+
+FROM linkchat-base-alpine:latest
+
+LABEL description="Alpine interactive development image with PyQt6 GUI"
+
+# Copy project files
+COPY pyproject.toml ./
+COPY linkchat/ ./linkchat/
+
+# Install the package in development mode
+# This is fast because dependencies are already in base image
+RUN pip install --no-cache-dir -e .
+
+# Environment variables for testing
+ENV QT_QPA_PLATFORM=offscreen
+ENV INTERFACE=eth0
+
+# Default to interactive shell for testing
+CMD ["/bin/bash"]

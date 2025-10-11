@@ -1,0 +1,28 @@
+# Dockerfile for running tests in Linux environment
+FROM python:3.13-alpine
+
+# Install build dependencies for Python packages
+RUN apk add --no-cache \
+    gcc \
+    musl-dev \
+    linux-headers
+
+# Set working directory
+WORKDIR /app
+
+# Copy project files
+COPY pyproject.toml uv.lock* ./
+COPY linkchat/ ./linkchat/
+COPY tests/ ./tests/
+
+# Install pytest
+RUN pip install --no-cache-dir pytest
+
+# Install the package in development mode
+RUN pip install --no-cache-dir -e .
+
+# Set environment to avoid buffering
+ENV PYTHONUNBUFFERED=1
+
+# Default command runs all tests
+CMD ["pytest", "tests/", "-v", "--tb=short"]

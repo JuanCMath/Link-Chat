@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  linkchat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: linkchat:latest
+    container_name: linkchat-app
+    
+    # CRITICAL: Host networking required for AF_PACKET access to physical interfaces
+    network_mode: host
+    
+    # CRITICAL: Raw socket capabilities required
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    
+    # X11 display forwarding (Linux hosts)
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_QPA_PLATFORM=xcb
+      - INTERFACE=${INTERFACE:-wlan0}
+    
+    volumes:
+      # X11 socket for GUI rendering
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # Downloaded files persistence
+      - ./downloads:/app/downloads
+    
+    # Interactive mode for testing
+    stdin_open: true
+    tty: true
+    
+    # Restart policy
+    restart: unless-stopped

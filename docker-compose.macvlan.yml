@@ -1,0 +1,116 @@
+# Docker Compose for Link-Chat with MACVLAN
+# Allows running multiple containers for testing Layer 2 communication
+#
+# Note: Link-Chat uses Layer 2 (MAC addresses)
+# IP addresses are for Docker management only
+
+version: '3.8'
+
+services:
+  linkchat1:
+    image: linkchat-interactive
+    container_name: linkchat-peer1
+    networks:
+      linkchat-macvlan:
+        # IP assignment is optional - Docker will auto-assign from range
+        # Link-Chat doesn't use IP, only MAC address matters
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      - DISPLAY=${DISPLAY:-host.docker.internal:0}
+      - QT_QPA_PLATFORM=xcb
+      - CONTAINER_NAME=peer1
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    stdin_open: true
+    tty: true
+    command: >
+      bash -c "
+        ip link set eth0 up
+        echo '=== Link-Chat Peer 1 ==='
+        echo 'Interface: eth0'
+        echo 'MAC Address: '$(cat /sys/class/net/eth0/address)
+        echo 'IP (Docker only): '$(ip addr show eth0 | grep 'inet ' | awk '{print $$2}')
+        echo 'Status: '$(ip link show eth0 | grep -o 'state [A-Z]*' | awk '{print $$2}')
+        echo ''
+        echo 'Use interface: eth0'
+        echo 'Starting GUI...'
+        python -m linkchat.app.qt_main
+      "
+
+  linkchat2:
+    image: linkchat-interactive
+    container_name: linkchat-peer2
+    networks:
+      linkchat-macvlan:
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      - DISPLAY=${DISPLAY:-host.docker.internal:0}
+      - QT_QPA_PLATFORM=xcb
+      - CONTAINER_NAME=peer2
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    stdin_open: true
+    tty: true
+    command: >
+      bash -c "
+        ip link set eth0 up
+        echo '=== Link-Chat Peer 2 ==='
+        echo 'Interface: eth0'
+        echo 'MAC Address: '$(cat /sys/class/net/eth0/address)
+        echo 'IP (Docker only): '$(ip addr show eth0 | grep 'inet ' | awk '{print $$2}')
+        echo 'Status: '$(ip link show eth0 | grep -o 'state [A-Z]*' | awk '{print $$2}')
+        echo ''
+        echo 'Use interface: eth0'
+        echo 'Starting GUI...'
+        python -m linkchat.app.qt_main
+      "
+
+  linkchat3:
+    image: linkchat-interactive
+    container_name: linkchat-peer3
+    networks:
+      linkchat-macvlan:
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      - DISPLAY=${DISPLAY:-host.docker.internal:0}
+      - QT_QPA_PLATFORM=xcb
+      - CONTAINER_NAME=peer3
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    stdin_open: true
+    tty: true
+    command: >
+      bash -c "
+        ip link set eth0 up
+        echo '=== Link-Chat Peer 3 ==='
+        echo 'Interface: eth0'
+        echo 'MAC Address: '$(cat /sys/class/net/eth0/address)
+        echo 'IP (Docker only): '$(ip addr show eth0 | grep 'inet ' | awk '{print $$2}')
+        echo 'Status: '$(ip link show eth0 | grep -o 'state [A-Z]*' | awk '{print $$2}')
+        echo ''
+        echo 'Use interface: eth0'
+        echo 'Starting GUI...'
+        python -m linkchat.app.qt_main
+      "
+
+networks:
+  linkchat-macvlan:
+    external: true
+    name: linkchat-macvlan
+
+# Usage:
+#   Start all 3 peers: docker-compose -f docker-compose.macvlan.yml up
+#   Start specific peer: docker-compose -f docker-compose.macvlan.yml up linkchat1
+#   Start in background: docker-compose -f docker-compose.macvlan.yml up -d
+#   Stop all: docker-compose -f docker-compose.macvlan.yml down
+#
+# Each container gets:
+#   - Unique MAC address (automatically assigned)
+#   - Interface name: eth0
+#   - IP address (Docker management only, not used by Link-Chat)

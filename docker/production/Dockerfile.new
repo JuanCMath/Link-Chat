@@ -1,0 +1,31 @@
+# Production Dockerfile (using base image)
+# For deployment on real Linux hardware
+#
+# First build the base image:
+#   docker build -f docker/base/Dockerfile.base -t linkchat-base:latest .
+#
+# Then build this image:
+#   docker build -f docker/production/Dockerfile -t linkchat-production .
+
+FROM linkchat-base:latest
+
+LABEL description="Production image for Link-Chat deployment"
+
+# Copy dependency files
+COPY pyproject.toml ./
+
+# Copy application code
+COPY linkchat/ ./linkchat/
+
+# Install the package
+RUN pip install --no-cache-dir .
+
+# Create downloads directory
+RUN mkdir -p /app/downloads
+
+# Environment variables for production
+ENV QT_QPA_PLATFORM=xcb
+ENV INTERFACE=wlan0
+
+# Default command
+CMD ["python", "-m", "linkchat.app.qt_main"]

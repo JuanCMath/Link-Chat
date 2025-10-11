@@ -1,0 +1,48 @@
+# Alpine-based production Dockerfile using pre-built base image
+# Fast rebuilds after base image is built once
+# 
+# First build the base image (ONE TIME - 40-60 minutes):
+#   docker build -f docker/base/Dockerfile.base.alpine -t linkchat-base-alpine:latest .
+#
+# Then build this image (30 seconds):
+#   docker build -f docker/production/Dockerfile.alpine -t linkchat-production-alpine .
+#
+# Run with GUI (requires X11):
+#   docker run -it --rm \
+#     -e DISPLAY=host.docker.internal:0 \
+#     --network host \
+#     linkchat-production-alpine
+
+FROM linkchat-base-alpine:latest
+
+LABEL description="Alpine-based production image with PyQt6 GUI (using base)"
+LABEL build.time="30 seconds (using base image)"
+
+# Copy dependency files
+COPY pyproject.toml ./
+
+# Copy application code
+COPY linkchat/ ./linkchat/
+
+# Install the application
+RUN pip install --no-cache-dir .
+
+# Clean up build dependencies to reduce final image size
+# Keep only runtime libraries
+RUN apk del \
+    gcc g++ make cmake \
+    qt6-qtbase-dev qt6-qttools-dev \
+    mesa-dev libx11-dev libxcb-dev \
+    xcb-util-dev xcb-util-image-dev \
+    xcb-util-keysyms-dev xcb-util-renderutil-dev \
+    xcb-util-wm-dev libxkbcommon-dev \
+    dbus-dev fontconfig-dev freetype-dev \
+    git && \
+    rm -rf /var/cache/apk/* /root/.cache
+
+# Environment variables for production
+ENV QT_QPA_PLATFORM=xcb
+ENV INTERFACE=wlan0
+
+# Default command - run the GUI
+CMD ["python", "-m", "linkchat.app.qt_main"]

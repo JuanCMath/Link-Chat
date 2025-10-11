@@ -1,0 +1,10 @@
+# Docker-specific ignores
+downloads/
+*.pyc
+__pycache__/
+.pytest_cache/
+*.egg-info/
+
+# Keep Dockerfile and docker-compose
+!Dockerfile*
+!docker-compose*.yml

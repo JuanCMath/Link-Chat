@@ -164,10 +164,43 @@ class MainWindow(QMainWindow):
         if self.backend and self.backend.is_running:
             return True
         # Ask for interface name (e.g., eth0, enp3s0, wlan0)
-        iface, ok = QInputDialog.getText(self, "Interfaz de red", "Nombre de interfaz (eth0/wlan0):")
+        # Show available interfaces if possible
+        try:
+            from ..env_check import list_available_interfaces
+            interfaces = list_available_interfaces()
+            if interfaces:
+                iface_list = ", ".join(interfaces)
+                prompt = f"Interfaces disponibles: {iface_list}\n\nIngrese el nombre de interfaz:"
+            else:
+                prompt = "Nombre de interfaz (eth0/wlan0/lo):"
+        except Exception:
+            prompt = "Nombre de interfaz (eth0/wlan0/lo):"
+            
+        iface, ok = QInputDialog.getText(self, "Interfaz de red", prompt)
         if not ok or not iface.strip():
             return False
         iface = iface.strip()
+        
+        # Check if interface exists
+        try:
+            from ..env_check import check_interface_exists
+            if not check_interface_exists(iface):
+                msg = f"La interfaz '{iface}' no existe.\n\n"
+                msg += "Interfaces disponibles:\n"
+                from ..env_check import list_available_interfaces
+                for if_name in list_available_interfaces():
+                    msg += f"  • {if_name}\n"
+                msg += "\n¿Desea continuar de todos modos?"
+                
+                reply = QMessageBox.question(
+                    self, "Interfaz no encontrada", msg,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.No:
+                    return False
+        except Exception:
+            pass  # If check fails, try anyway
+        
         try:
             self.backend = LinkChatBackend(interface=iface)
             # Hook callbacks
@@ -180,6 +213,28 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Conectado en {iface}", 3000)
             self.lblPeer.setText(f"Interfaz: {iface} | MAC: {self.backend.local_mac_str}")
             return True
+        except PermissionError:
+            msg = "Error de permisos: se requieren privilegios de root o CAP_NET_RAW.\n\n"
+            msg += "Soluciones:\n"
+            msg += "  • En Docker: usar --cap-add=NET_RAW --cap-add=NET_ADMIN\n"
+            msg += "  • En Linux: ejecutar con sudo\n"
+            msg += "  • Ver documentación: docker/RUN_WITH_NETWORK.md"
+            QMessageBox.critical(self, "Error de Permisos", msg)
+            return False
+        except OSError as e:
+            if "No such device" in str(e):
+                msg = f"La interfaz '{iface}' no existe en este contenedor/sistema.\n\n"
+                msg += "Si está en Docker:\n"
+                msg += "  • En Windows: Docker Desktop no puede acceder a WiFi/Ethernet del host\n"
+                msg += "  • Use WSL2 directamente o deploy en Linux\n"
+                msg += "  • Para pruebas: use interfaz 'lo' (loopback)\n\n"
+                msg += "Si está en Linux:\n"
+                msg += "  • Use --network host al ejecutar Docker\n"
+                msg += "  • Verifique que la interfaz existe: ip link show"
+                QMessageBox.critical(self, "Interfaz No Disponible", msg)
+            else:
+                QMessageBox.critical(self, "Error", f"No se pudo iniciar backend: {e}")
+            return False
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "Error", f"No se pudo iniciar backend: {e}")
             return False

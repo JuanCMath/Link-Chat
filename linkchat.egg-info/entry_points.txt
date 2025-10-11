@@ -1,0 +1,2 @@
+[console_scripts]
+linkchat-gui = linkchat.app.qt_main:run
