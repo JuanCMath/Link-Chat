@@ -8,7 +8,7 @@ import os
 import time
 import hashlib
 import threading
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, Optional, Callable, Tuple
 from dataclasses import dataclass, field
 
@@ -116,7 +116,7 @@ class FileTransfer:
         self._ack_events: Dict[Tuple[bytes, str, int], threading.Event] = {}
         self._lock = threading.Lock()
     
-    def send_file(self, dst_mac: bytes, filepath: str) -> bool:
+    def send_file(self, dst_mac: bytes, filepath: str, virtual_path: Optional[str] = None) -> bool:
         """Send a file to the specified destination.
         
         Process:
@@ -134,6 +134,9 @@ class FileTransfer:
         Args:
             dst_mac: Destination MAC address (6 bytes).
             filepath: Path to the file to send.
+            virtual_path: Optional relative path advertised to receiver instead of
+                the actual filename. Used by FolderTransfer to preserve directory
+                structure (e.g., "MyFolder/subdir/file.txt").
         
         Returns:
             True if all chunks were acknowledged successfully, False if any chunk
@@ -144,45 +147,45 @@ class FileTransfer:
         """
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"File not found: {filepath}")
-        
+
         file_size = os.path.getsize(filepath)
-        filename = os.path.basename(filepath)
+        transfer_name = self._determine_transfer_name(filepath, virtual_path)
         total_chunks = (file_size + self.chunk_size - 1) // self.chunk_size
         
         file_hash = self._compute_file_hash(filepath)
         
-        transfer_key = (dst_mac, filename)
+        transfer_key = (dst_mac, transfer_name)
         self.active_sends[transfer_key] = FileTransferState(
-            filename=filename,
+            filename=transfer_name,
             total_size=file_size,
             total_chunks=total_chunks,
             file_hash=file_hash
         )
         
         try:
-            meta_payload = f"{filename}|{file_size}|{total_chunks}|{file_hash}".encode('utf-8')
+            meta_payload = f"{transfer_name}|{file_size}|{total_chunks}|{file_hash}".encode('utf-8')
             self.link_layer.send(dst_mac, FrameType.FILE_META, meta_payload)
             time.sleep(0.1)
             
             with open(filepath, 'rb') as f:
                 for chunk_id in range(total_chunks):
                     chunk_data = f.read(self.chunk_size)
-                    success = self._send_chunk_reliable(dst_mac, filename, chunk_id, chunk_data)
+                    success = self._send_chunk_reliable(dst_mac, transfer_name, chunk_id, chunk_data)
                     
                     if not success:
                         if self.on_complete:
-                            self.on_complete(filename, False)
+                            self.on_complete(transfer_name, False)
                         return False
                     
                     bytes_sent = min((chunk_id + 1) * self.chunk_size, file_size)
                     if self.on_progress:
-                        self.on_progress(filename, bytes_sent, file_size)
+                        self.on_progress(transfer_name, bytes_sent, file_size)
 
                     if self.inter_chunk_delay:
                         time.sleep(self.inter_chunk_delay)
             
             if self.on_complete:
-                self.on_complete(filename, True)
+                self.on_complete(transfer_name, True)
             return True
             
         finally:
@@ -192,20 +195,22 @@ class FileTransfer:
     def _send_chunk_reliable(self, dst_mac: bytes, filename: str, chunk_id: int, data: bytes) -> bool:
         """Send a single chunk with retransmission logic.
 
-    Implements reliable transmission using ACKs and retries:
-    1. Creates a threading.Event keyed by (dst_mac, filename, chunk_id).
-    2. Sends FILE_CHUNK frame with payload: chunk_id(4 bytes) + filename + '|' + data.
-    3. Waits for ACK using the configured ack_timeout.
-    4. If ACK received, returns True.
-    5. If timeout, retries up to the configured max_retries.
-    6. Returns False if all retries exhausted.
+        Implements reliable transmission using ACKs and retries:
+        1. Creates a threading.Event keyed by (dst_mac, filename, chunk_id).
+        2. Sends FILE_CHUNK frame with payload: chunk_id(4 bytes) + filename + '|' + data.
+        3. Waits for ACK using the configured ack_timeout.
+        4. If ACK received, returns True.
+        5. If timeout, retries up to the configured max_retries.
+        6. Returns False if all retries exhausted.
 
         The ACK is received asynchronously in _handle_ack() which sets the Event,
-        unblocking the wait() call.
+        unblocking the wait() call. The filename is included in the ACK key to ensure
+        ACKs for different files (even with the same chunk_id) are properly isolated,
+        preventing cross-file ACK interference when multiple files are in flight.
 
         Args:
             dst_mac: Destination MAC address (6 bytes).
-            filename: Name of file being sent (for payload identification).
+            filename: Name of file being sent (for payload identification and ACK isolation).
             chunk_id: Chunk sequence number (0 to total_chunks-1).
             data: Chunk data bytes (up to configured chunk_size).
 
@@ -261,6 +266,11 @@ class FileTransfer:
         and creates a FileTransferState entry in active_receives to track
         incoming chunks. This must be received before any FILE_CHUNK frames.
         
+        The filename is now sanitized to prevent directory traversal attacks
+        and ensure safe file creation on the receiver side. If virtual_path
+        was used by the sender (e.g., for folder transfers), it is preserved
+        as the transfer_name to maintain directory structure.
+        
         Args:
             frame: Received metadata frame with FILE_META type.
         """
@@ -268,11 +278,15 @@ class FileTransfer:
             parts = frame.payload.decode('utf-8').split('|')
             if len(parts) != 4:
                 raise ValueError("FILE_META payload must contain filename|size|chunks|hash")
-            filename, size_str, chunks_str, file_hash = parts
-            
-            transfer_key = (frame.src, filename)
+            filename_raw, size_str, chunks_str, file_hash = parts
+            transfer_name = self._sanitize_transfer_name(filename_raw)
+            if not transfer_name:
+                fallback_name = Path(filename_raw).name
+                sanitized_fallback = self._sanitize_transfer_name(fallback_name)
+                transfer_name = sanitized_fallback if sanitized_fallback else fallback_name
+            transfer_key = (frame.src, transfer_name)
             self.active_receives[transfer_key] = FileTransferState(
-                filename=filename,
+                filename=transfer_name,
                 total_size=int(size_str),
                 total_chunks=int(chunks_str),
                 file_hash=file_hash
@@ -286,10 +300,17 @@ class FileTransfer:
         Processes a received file chunk:
         1. Extracts chunk_id from first 4 bytes.
         2. Parses filename and chunk data separated by '|'.
-        3. Stores chunk in transfer state dictionary.
+        3. Checks if chunk is new or a duplicate:
+           - New chunks: stored and received_size incremented.
+           - Duplicate chunks with identical data: silently ignored (no size change).
+           - Duplicate chunks with different data: replaced and size adjusted by delta.
         4. Immediately sends ACK frame to sender.
-        5. Updates progress via callback when a new chunk is accepted or size changes.
+        5. Updates progress via callback only when size actually changes.
         6. If all chunks received, calls _finalize_file_reception().
+        
+        The duplicate handling ensures that progress counters remain accurate even
+        if the same chunk is retransmitted multiple times, preventing inflated
+        byte counts or incorrect completion detection.
         
         Args:
             frame: Received chunk frame with FILE_CHUNK type.
@@ -301,10 +322,15 @@ class FileTransfer:
             if separator_idx == -1:
                 return
             
-            filename = frame.payload[4:separator_idx].decode('utf-8')
+            filename_raw = frame.payload[4:separator_idx].decode('utf-8')
+            transfer_name = self._sanitize_transfer_name(filename_raw)
+            if not transfer_name:
+                fallback_name = Path(filename_raw).name
+                sanitized_fallback = self._sanitize_transfer_name(fallback_name)
+                transfer_name = sanitized_fallback if sanitized_fallback else fallback_name
             chunk_data = frame.payload[separator_idx + 1:]
             
-            transfer_key = (frame.src, filename)
+            transfer_key = (frame.src, transfer_name)
             if transfer_key not in self.active_receives:
                 return
             
@@ -324,14 +350,14 @@ class FileTransfer:
                         transfer.received_size += delta
                         progress_refresh_needed = True
             
-            ack_payload = chunk_id.to_bytes(4, 'big') + filename.encode('utf-8')
+            ack_payload = chunk_id.to_bytes(4, 'big') + transfer.filename.encode('utf-8')
             self.link_layer.send(frame.src, FrameType.ACK, ack_payload)
             
             if self.on_progress and (is_new_chunk or progress_refresh_needed):
-                self.on_progress(filename, transfer.received_size, transfer.total_size)
+                self.on_progress(transfer.filename, transfer.received_size, transfer.total_size)
             
             if len(transfer.chunks) == transfer.total_chunks:
-                self._finalize_file_reception(frame.src, filename)
+                self._finalize_file_reception(frame.src, transfer.filename)
         
         except (ValueError, UnicodeDecodeError) as e:
             print(f"Invalid FILE_CHUNK: {e}")
@@ -343,6 +369,11 @@ class FileTransfer:
         corresponding threading.Event to unblock the waiting send thread in
         _send_chunk_reliable(). This allows the sender to proceed to the next chunk
         even when multiple files are in flight to the same destination.
+        
+        The filename is included in the ACK key (dst_mac, filename, chunk_id) to
+        ensure file-specific ACK isolation. Without this, an ACK for "file1.txt"
+        chunk 0 could incorrectly unblock a waiting thread for "file2.txt" chunk 0,
+        causing premature transmission failures or data corruption.
         
         Args:
             frame: Received ACK frame with chunk acknowledgment.
@@ -380,8 +411,8 @@ class FileTransfer:
             return
         
         try:
-            output_path = self.download_dir / filename
-            
+            output_path = self._resolve_output_path(filename)
+
             with open(output_path, 'wb') as f:
                 for chunk_id in sorted(transfer.chunks.keys()):
                     f.write(transfer.chunks[chunk_id])
@@ -421,3 +452,64 @@ class FileTransfer:
             while chunk := f.read(8192):
                 sha256.update(chunk)
         return sha256.hexdigest()
+
+    def _determine_transfer_name(self, filepath: str, virtual_path: Optional[str]) -> str:
+        """Determine the advertised transfer name for a file send.
+        
+        If virtual_path is provided (e.g., by FolderTransfer), it takes precedence
+        over the actual filename. This allows preserving directory structure when
+        sending files as part of a folder transfer.
+        
+        Args:
+            filepath: Actual file path on disk.
+            virtual_path: Optional virtual path to advertise instead.
+        
+        Returns:
+            Sanitized transfer name to use in FILE_META and FILE_CHUNK frames.
+        """
+        candidate = virtual_path if virtual_path else Path(filepath).name
+        sanitized = self._sanitize_transfer_name(candidate)
+        if sanitized:
+            return sanitized
+        fallback = self._sanitize_transfer_name(Path(filepath).name)
+        return fallback if fallback else Path(filepath).name
+
+    def _sanitize_transfer_name(self, value: str) -> str:
+        """Sanitize a transfer name to prevent directory traversal attacks.
+        
+        Removes path components like "..", ".", and empty strings to ensure
+        the transfer name cannot escape the download directory.
+        
+        Args:
+            value: Transfer name to sanitize (may contain path separators).
+        
+        Returns:
+            Sanitized path using forward slashes, safe for cross-platform use.
+        """
+        normalized = value.replace("\\", "/")
+        parts = [part for part in PurePosixPath(normalized).parts if part not in ("", ".", "..")]
+        return "/".join(parts)
+
+    def _resolve_output_path(self, transfer_name: str) -> Path:
+        """Resolve the output path for a received file transfer.
+        
+        Applies sanitization and constructs the full output path within the
+        download directory. For nested paths (e.g., "folder/subdir/file.txt"),
+        creates parent directories as needed.
+        
+        Args:
+            transfer_name: Sanitized transfer name from FILE_META.
+        
+        Returns:
+            Absolute path where the file should be saved.
+        
+        Raises:
+            ValueError: If the sanitized path resolves to the download directory itself.
+        """
+        sanitized = self._sanitize_transfer_name(transfer_name)
+        parts = sanitized.split("/") if sanitized else []
+        path = self.download_dir.joinpath(*parts) if parts else self.download_dir / Path(transfer_name).name
+        if path == self.download_dir:
+            raise ValueError("Invalid transfer path")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path

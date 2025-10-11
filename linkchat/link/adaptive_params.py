@@ -11,8 +11,6 @@ higher packet loss (5-15%) and variable latency, requiring more conservative
 settings to ensure reliable delivery.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional

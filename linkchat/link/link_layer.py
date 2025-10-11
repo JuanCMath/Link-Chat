@@ -27,11 +27,13 @@ class FrameType(enum.IntEnum):
         FILE_META: File metadata/header frame (0x02).
         FILE_CHUNK: File data chunk frame (0x03).
         ACK: Acknowledgment frame (0x04).
+        FOLDER_META: Folder metadata frame (0x05).
     """
     MESSAGE = 0x01
     FILE_META = 0x02
     FILE_CHUNK = 0x03
     ACK = 0x04
+    FOLDER_META = 0x05
 
 
 @dataclass(slots=True)
