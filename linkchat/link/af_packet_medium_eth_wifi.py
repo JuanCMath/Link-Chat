@@ -31,9 +31,12 @@ maintaining the same general API.
 from __future__ import annotations
 
 import fcntl  # type: ignore[attr-defined]
+import logging
 import socket
 import struct
 from typing import Iterator, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # Protocol constants for AF_PACKET sockets
 ETH_P_ALL = 0x0003  # Receive all Ethernet protocols
@@ -155,17 +158,17 @@ class AFPacketMediumEthWifi:
         if self.enable_promiscuous:
             try:
                 self._set_promiscuous(False)
-            except OSError:
-                pass
+            except OSError as e:
+                logger.warning("Failed to disable promiscuous mode: %s", e)
         try:
             self.sock.close()
-        except OSError:
-            pass
+        except OSError as e:
+            logger.warning("Failed to close main socket: %s", e)
         if self._control_sock is not None:
             try:
                 self._control_sock.close()
-            except OSError:
-                pass
+            except OSError as e:
+                logger.warning("Failed to close control socket: %s", e)
             self._control_sock = None
 
     def send(self, dst_mac: bytes, payload: bytes, ethertype: Optional[int] = None) -> None:

@@ -16,17 +16,20 @@ How it works:
 """
 from __future__ import annotations
 
+import logging
+
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QLabel, QStatusBar, QToolBar,
     QFileDialog, QMessageBox, QListWidget, QListWidgetItem, QHBoxLayout,
-    QPushButton, QInputDialog
+    QPushButton, QInputDialog, QTabWidget
 )
 from PyQt6.QtGui import QAction
 
 from linkchat.backend import LinkChatBackend
 from linkchat.constants import BROADCAST_MAC
 from .chat_panel import ChatPanel
+from .log_handler import LogViewer, setup_gui_logging
 
 
 class MainWindow(QMainWindow):
@@ -52,6 +55,7 @@ class MainWindow(QMainWindow):
         self.current_dst: bytes | None = None
 
         self._build_ui()
+        self._setup_logging()
         self._connect_signals()
 
         # Periodic UI refresh for peers
@@ -82,10 +86,16 @@ class MainWindow(QMainWindow):
         left.addWidget(self.btnConnect)
         left.addWidget(self.btnDisconnect)
 
-        # Right: chat panel
+        # Right: tabbed interface with chat and logs
+        self.tabs = QTabWidget()
         self.chat = ChatPanel()
+        self.log_viewer = LogViewer()
+        
+        self.tabs.addTab(self.chat, "💬 Chat")
+        self.tabs.addTab(self.log_viewer, "📋 Logs")
+        
         root.addLayout(left, 0)
-        root.addWidget(self.chat, 1)
+        root.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
 
         # Status bar
@@ -114,6 +124,19 @@ class MainWindow(QMainWindow):
 
         mAyuda = menubar.addMenu("Ayuda")
         mAyuda.addAction(self.actAbout)
+
+    def _setup_logging(self) -> None:
+        """Set up GUI logging to display logs in the log viewer tab.
+        
+        Configures a custom Qt logging handler that routes all application
+        logs (from backend and GUI) to the log viewer widget. Logs are
+        color-coded by severity level for easy debugging.
+        """
+        setup_gui_logging(self.log_viewer, level=logging.DEBUG)
+        
+        # Log startup message
+        logger = logging.getLogger(__name__)
+        logger.info("LinkChat GUI initialized - logging system active")
 
     def _connect_signals(self) -> None:
         """Wire widget signals to their corresponding handlers.
@@ -170,7 +193,6 @@ class MainWindow(QMainWindow):
         if not self.backend or not self.backend.is_running:
             return
         peers = self.backend.list_peers()
-        known = {self._peer_key(i): i for i in peers}
         # Rebuild list simple
         self.lstPeers.clear()
         for info in peers:
@@ -256,14 +278,8 @@ class MainWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta")
         if not folder:
             return
-        # Folder transfer uses FileTransfer + metadata via FolderTransfer
-        try:
-            from linkchat.link.folder_transfer import FolderTransfer  # lazy import
-        except Exception as e:  # noqa: BLE001
-            QMessageBox.critical(self, "Error", f"No se pudo cargar FolderTransfer: {e}")
-            return
-        ft = FolderTransfer(self.backend._link_layer, self.backend._file_transfer, str(self.backend.download_dir))  # type: ignore[arg-type,attr-defined]
-        ok = ft.send_folder(self.current_dst, folder)
+        
+        ok = self.backend.send_folder(self.current_dst, folder)
         status = "OK" if ok else "Fallo"
         self.statusBar().showMessage(f"Carpeta: {status}", 4000)
 

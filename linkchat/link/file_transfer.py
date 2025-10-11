@@ -5,17 +5,20 @@ folder transfers over the link layer. Coordinates metadata handling and
 reliability layers to provide a complete transfer solution.
 """
 
+import hashlib
+import logging
 import os
 import time
-import hashlib
-from pathlib import Path, PurePosixPath
-from typing import Dict, Optional, Callable, Tuple, List
 from dataclasses import dataclass, field
+from pathlib import Path, PurePosixPath
+from typing import Callable, Dict, List, Optional, Tuple
 
-from .link_layer import LinkLayer, LinkFrame, FrameType
 from .adaptive_params import FileParams, file_params_from_medium
-from .transfer_metadata import TransferMetadata, ACKPayload
+from .link_layer import FrameType, LinkFrame, LinkLayer
+from .transfer_metadata import ACKPayload, TransferMetadata
 from .transfer_reliability import ReliableTransfer
+
+logger = logging.getLogger(__name__)
 
 
 _FILE_DEFAULTS = FileParams(
@@ -317,7 +320,7 @@ class FileTransfer:
         """
         data = TransferMetadata.parse_metadata(frame.payload)
         if data is None:
-            print("Invalid TRANSFER_META: failed to parse JSON")
+            logger.warning("Invalid TRANSFER_META: failed to parse JSON")
             return
         
         transfer_type = data.get("type")
@@ -327,7 +330,7 @@ class FileTransfer:
         elif transfer_type == "folder":
             self._handle_folder_metadata(frame, data)
         else:
-            print(f"Unknown transfer type: {transfer_type}")
+            logger.warning("Unknown transfer type: %s", transfer_type)
     
     def _handle_file_metadata(self, frame: LinkFrame, data: dict):
         """Handle file-specific metadata from TRANSFER_META frame.
@@ -344,7 +347,7 @@ class FileTransfer:
         hash_val = data.get("hash", "")
         
         if not all([filename_raw, isinstance(size_val, int), isinstance(chunks_val, int), hash_val]):
-            print("Invalid file metadata: missing required fields")
+            logger.warning("Invalid file metadata: missing required fields")
             return
         
         transfer_name = self._sanitize_transfer_name(filename_raw)
@@ -379,12 +382,12 @@ class FileTransfer:
         files_value = data.get("files", [])
         
         if not isinstance(root_value, str):
-            print("Invalid folder metadata: root must be a string")
+            logger.warning("Invalid folder metadata: root must be a string")
             return
         
         root_token = self._sanitize_transfer_name(root_value)
         if not root_token:
-            print("Invalid folder metadata: root name cannot be empty")
+            logger.warning("Invalid folder metadata: root name cannot be empty")
             return
         
         # Create root directory
@@ -476,7 +479,7 @@ class FileTransfer:
                 self._finalize_file_reception(frame.src, transfer.filename)
         
         except (ValueError, UnicodeDecodeError) as e:
-            print(f"Invalid FILE_CHUNK: {e}")
+            logger.warning("Invalid FILE_CHUNK: %s", e)
     
     def _handle_ack(self, frame: LinkFrame):
         """Handle ACK frame to signal chunk or metadata receipt.
@@ -525,7 +528,8 @@ class FileTransfer:
             success = (received_hash == transfer.file_hash)
             
             if not success:
-                print(f"Hash mismatch for {filename}! Expected {transfer.file_hash}, got {received_hash}")
+                logger.error("Hash mismatch for %s! Expected %s, got %s", 
+                           filename, transfer.file_hash, received_hash)
             
             if self.on_complete:
                 self.on_complete(filename, success)
@@ -533,7 +537,7 @@ class FileTransfer:
             self.active_receives.pop(transfer_key, None)
         
         except Exception as e:
-            print(f"Error finalizing {filename}: {e}")
+            logger.error("Error finalizing %s: %s", filename, e)
             if self.on_complete:
                 self.on_complete(filename, False)
     

@@ -12,7 +12,7 @@ with this backend.
 
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, List
 
 from .constants import ETHERTYPE_DATA, ETHERTYPE_DISCOVERY
 from .link.af_packet_medium_eth_wifi import AFPacketMediumEthWifi
@@ -366,7 +366,7 @@ class LinkChatBackend:
     # Peer discovery utilities
     # ------------------------------------------------------------------
     
-    def list_peers(self):
+    def list_peers(self) -> List[PeerInfo]:
         """Get list of currently discovered peers.
         
         Returns:
