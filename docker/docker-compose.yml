@@ -1,5 +1,3 @@
-version: "3.9"
-
 x-common-env: &common-env
   # Ajusta si tu módulo lee estas variables (ej. en tu medium/link layer)
   INTERFACE: "enp0s3"              # NIC dentro del contenedor

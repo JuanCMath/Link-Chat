@@ -283,7 +283,7 @@ class MessageProtocol:
 
         message_id = int.from_bytes(payload[1:_MESSAGE_ACK_SIZE], "big")
         key = (frame.src, message_id)
-
+        
         with self._lock:
             event = self._pending_acks.pop(key, None)
 

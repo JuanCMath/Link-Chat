@@ -11,7 +11,7 @@ services:
       - NET_RAW
     networks:
       linkchat-macvlan:
-        ipv4_address: 172.30.64.97
+        ipv4_address: 192.168.11.97
     environment:
       LINKCHAT_INTERFACE: eth0
       LINKCHAT_NODE: chat1
@@ -28,7 +28,7 @@ services:
       - NET_RAW
     networks:
       linkchat-macvlan:
-        ipv4_address: 172.30.64.98
+        ipv4_address: 192.168.11.98
     environment:
       LINKCHAT_INTERFACE: eth0
       LINKCHAT_NODE: chat2
