@@ -18,13 +18,13 @@ Example:
     >>> layer.start()
 """
 
-from .af_packet_medium_eth_wifi import AFPacketMediumEthWifi
-from .csma_persistent import CSMAPersistent
-from .link_layer import LinkLayer, FrameType, LinkFrame
-from .file_transfer import FileTransfer, FileTransferState
-from .transfer_reliability import ReliableTransfer
+from .medium.af_packet_medium_eth_wifi import AFPacketMediumEthWifi
+from .mac.csma_persistent import CSMAPersistent
+from .core.link_layer import LinkLayer, FrameType, LinkFrame
+from .transfer.file_transfer import FileTransfer, FileTransferState
+from .transfer.transfer_reliability import ReliableTransfer
 from .peer_discovery import PeerInfo, PeerDiscoveryService
-from .message_protocol import MessageProtocol
+from .core.message_protocol import MessageProtocol
 
 __all__ = [
     "AFPacketMediumEthWifi",

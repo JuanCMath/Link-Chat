@@ -7,7 +7,7 @@ with automatic retransmission on timeout.
 import threading
 from typing import Dict, Tuple, Union
 
-from .link_layer import LinkLayer, FrameType
+from ..core.link_layer import LinkLayer, FrameType
 
 
 class ReliableTransfer:

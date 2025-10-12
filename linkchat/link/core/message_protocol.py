@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, Tuple
 
 from .link_layer import FrameType, LinkFrame, LinkLayer
-from .adaptive_params import MessageParams, message_params_from_medium
+from ..mac.adaptive_params import MessageParams, message_params_from_medium
 
 # Message header format: message_id(2) + total_parts(2) + part_index(2) = 6 bytes
 _MESSAGE_HEADER_BYTES = 6

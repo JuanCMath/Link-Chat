@@ -19,7 +19,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
-from .af_packet_medium_eth_wifi import AFPacketMediumEthWifi
+from .medium.af_packet_medium_eth_wifi import AFPacketMediumEthWifi
 
 # Protocol constants
 MAGIC = b"LCD"  # Link-Chat Discovery magic header

@@ -4,8 +4,8 @@ Provides functions to encode data into frames with headers, checksums, and
 bit stuffing for synchronization. Supports frame decoding with validation.
 """
 
-from .checksum import checksum16_ones_complement, verify_checksum
-from .utils_bits import bytes_to_bits, bits_to_bytes, bit_stuff, bit_unstuff
+from ..utils.checksum import checksum16_ones_complement, verify_checksum
+from ..utils.utils_bits import bytes_to_bits, bits_to_bytes, bit_stuff, bit_unstuff
 
 FLAG = 0x7E
 

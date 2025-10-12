@@ -11,8 +11,8 @@ import threading
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from .af_packet_medium_eth_wifi import AFPacketMediumEthWifi
-from .csma_persistent import CSMAPersistent
+from ..medium.af_packet_medium_eth_wifi import AFPacketMediumEthWifi
+from ..mac.csma_persistent import CSMAPersistent
 from .framing import frame_decode, frame_encode
 
 

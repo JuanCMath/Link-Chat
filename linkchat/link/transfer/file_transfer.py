@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, List, Optional, Tuple
 
-from .adaptive_params import FileParams, file_params_from_medium
-from .link_layer import FrameType, LinkFrame, LinkLayer
+from ..mac.adaptive_params import FileParams, file_params_from_medium
+from ..core.link_layer import FrameType, LinkFrame, LinkLayer
 from .transfer_metadata import ACKPayload, TransferMetadata
 from .transfer_reliability import ReliableTransfer
 
@@ -529,7 +529,7 @@ class FileTransfer:
             
             if not success:
                 logger.error("Hash mismatch for %s! Expected %s, got %s", 
-                           filename, transfer.file_hash, received_hash)
+                             filename, transfer.file_hash, received_hash)
             
             if self.on_complete:
                 self.on_complete(filename, success)
