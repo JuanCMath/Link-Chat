@@ -6,6 +6,7 @@ interface for sending and receiving link-layer frames with automatic sequence nu
 collision avoidance, and background reception.
 """
 
+import time
 import enum
 import threading
 from dataclasses import dataclass
@@ -204,7 +205,17 @@ class LinkLayer:
         event.
         """
         while not self._stop_rx.is_set():
-            packet = self.medium.recv_once(timeout=0.2)
+            try:
+                packet = self.medium.recv_once(timeout=0.2)
+            except OSError as e:
+                if e.errno == 100:  # Network is down
+                    print(f"Interface went down: {e}")
+                    # Could attempt to recover or just log and continue
+                    time.sleep(1)
+                    continue
+                else:
+                    print(f"Socket error: {e}")
+                    raise
             if packet is None:
                 continue
             dst, src, etype, payload = packet

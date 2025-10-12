@@ -68,7 +68,7 @@ class LogViewer(QTextEdit):
         """
         super().__init__(parent)
         self.setReadOnly(True)
-        self.setMaximumBlockCount(1000)  # Limit to last 1000 log lines
+        self.document().setMaximumBlockCount(1000)  # Limit to last 1000 log lines
         
     def append_log(self, level: str, message: str) -> None:
         """Append a log message with appropriate color coding.

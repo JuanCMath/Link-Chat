@@ -34,6 +34,7 @@ import fcntl  # type: ignore[attr-defined]
 import logging
 import socket
 import struct
+from time import time, sleep
 from typing import Iterator, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,20 @@ SIOCGIFMTU = 0x8921     # Get Maximum Transfer Unit
 
 # Interface flag bits
 IFF_PROMISC = 0x100     # Promiscuous mode enabled
+
+
+def wait_interface_up(iface, timeout=5.0):
+        start = time()
+        while time() - start < timeout:
+            try:
+                with open(f"/sys/class/net/{iface}/operstate") as f:
+                    if f.read().strip() not in {"down", "notpresent"}:
+                        return True
+            except FileNotFoundError:
+                pass
+            sleep(0.1)
+        print(f"Interface {iface} not up, timeout of {timeout}s reached")
+        raise RuntimeError(f"Interface {iface} not up after {timeout}s")
 
 
 class AFPacketMediumEthWifi:
@@ -121,6 +136,8 @@ class AFPacketMediumEthWifi:
             RuntimeError: If socket type selection fails after trying all
                 configured options.
         """
+
+        wait_interface_up(iface)
         self.iface = iface
         self.ethertype = ethertype
         self.filter_ethertype = filter_ethertype
@@ -256,12 +273,33 @@ class AFPacketMediumEthWifi:
         Raises:
             OSError: If socket receive operation fails (except timeout).
         """
+        try:
+            for _ in range(3):
+                with open(f"/sys/class/net/{self.iface}/operstate") as f:
+                    state = f.read().strip().lower()
+                if state not in {"down", "notpresent"}:
+                    break
+                sleep(0.2)
+            else:
+                raise OSError(100, f"Network is down (state: {state})")
+
+        except FileNotFoundError:
+            raise OSError(100, f"Interface {self.iface} no longer exists")
+        
+
         if timeout is not None:
             self.sock.settimeout(timeout)
         try:
             frame, _ = self.sock.recvfrom(self.bufsize)
         except socket.timeout:
             return None
+        except OSError as e:
+            if e.errno == 100:
+                logger.warning("Network down, attempting recovery...")
+                self._reopen_socket()
+                return None  # Skip this receive cycle
+            raise
+        
         parsed = self._parse_frame(frame)
         if parsed is None:
             return None
@@ -269,6 +307,21 @@ class AFPacketMediumEthWifi:
         if self.filter_ethertype and etype != self.ethertype:
             return None
         return parsed
+
+
+    def _reopen_socket(self):
+        """Reopen socket if interface went down."""
+        try:
+            if self.sock:
+                self.sock.close()
+            self.sock = self._open_socket(self.sock_type)
+            if self.enable_promiscuous:
+                self._set_promiscuous(True)
+            logger.info(f"Socket reopened on {self.iface}")
+        except Exception as e:
+            logger.error(f"Failed to reopen socket: {e}")
+            raise
+
 
     # ------------------------------------------------------------------
     # Interface / ioctl helpers
