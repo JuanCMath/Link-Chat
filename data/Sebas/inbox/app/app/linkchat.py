@@ -2,13 +2,12 @@
 linkchat.py
 ~~~~~~~~~~~
 
-LinkChat - Raw Ethernet P2P chat with file and directory transfer.
+LinkChat - Raw Ethernet P2P chat with file transfer.
 
 A peer-to-peer chat application over raw Ethernet frames featuring:
 - Peer discovery via periodic beacons
-- Unicast text messaging with ACK confirmation and retries
+- Unicast text messaging with ACK confirmation
 - Reliable file transfer with automatic retries
-- Directory transfer with tarball packaging and extraction
 - No IP/TCP required - works directly at layer 2
 
 Environment Variables:
@@ -22,13 +21,6 @@ Environment Variables:
     MSG_MAX_RETRIES: Maximum message retry attempts
     FILE_RETRY_INTERVAL: Seconds between chunk retries
     FILE_MAX_RETRIES: Maximum chunk retry attempts
-
-Commands:
-    /sendfile <MAC|Name> <path>  - Send individual file
-    /senddir <MAC|Name> <path>   - Send directory (packaged as .tar.gz)
-    /peer <MAC|Name>             - Set active peer for chat messages
-    /peers                       - List discovered peers
-    /discover on|off             - Control beacon broadcasts
 """
 import logging
 import os
@@ -98,25 +90,9 @@ def resolve_mac(token: str) -> Optional[str]:
 
 
 def create_directory_archive(dir_path: str) -> Optional[Dict[str, str]]:
-    """
-    Package a directory into a temporary .tar.gz archive.
+    """Package a directory into a temporary .tar.gz archive.
 
-    Creates a compressed tarball of the entire directory tree, preserving
-    relative paths and metadata. The archive is created in the system
-    temp directory with a unique name.
-
-    Args:
-        dir_path: Path to directory to package.
-
-    Returns:
-        Optional[Dict[str, str]]: Dictionary with keys:
-            - archive_path: Path to created .tar.gz file
-            - folder_name: Base name of the packaged directory
-        Returns None if directory doesn't exist or packaging fails.
-
-    Notes:
-        Caller is responsible for cleaning up the temporary archive file
-        after transfer completes (tracked via pending_archives dict).
+    Returns metadata containing the archive path and folder name, or None on failure.
     """
 
     dir_path = os.path.abspath(dir_path)
@@ -143,7 +119,6 @@ def create_directory_archive(dir_path: str) -> Optional[Dict[str, str]]:
         return None
 
     return {"archive_path": tmp_path, "folder_name": folder_name}
-
 
 
 def on_frame(dst: bytes, src: bytes, payload: bytes) -> None:
@@ -237,22 +212,7 @@ def handle_ack(kind: str, src_mac: bytes, data: Dict) -> None:
 
 
 def ft_on_complete(role: str, sid: str, ok: bool) -> None:
-    """
-    Handle file transfer completion events.
-
-    Called by FTv2 protocol when a transfer session completes (successfully
-    or with failure). Cleans up temporary archives created for directory
-    transfers.
-
-    Args:
-        role: Transfer role ("TX" or "RX").
-        sid: Transfer session identifier.
-        ok: True if transfer completed successfully.
-
-    Notes:
-        Removes temporary .tar.gz archives from pending_archives tracking dict
-        when /senddir transfers finish. File transfers pass through without action.
-    """
+    """Handle file-transfer completion events, including temp archive cleanup."""
 
     status = "OK" if ok else "FAIL"
     print(f"[{role} {sid}] {status}", flush=True)

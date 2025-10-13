@@ -5,12 +5,11 @@ file_transfer.py
 Binary file transfer protocol with CRC validation and automatic retries.
 
 This module implements FTv2, a reliable file transfer protocol over raw Ethernet
-frames supporting both individual files and directories using:
+frames using:
 - Control handshake: REQ/ACPT/BUSY/RJCT/DONE/ABRT messages
 - Sequenced data chunks with CRC16-CCITT validation
 - Automatic chunk retransmission via AckRetryManager
 - Single active incoming transfer (exclusive RX lock)
-- Directory transfers via tarball packaging and extraction
 
 Frame Types:
 - TYPE_CTRL (0x10): Control messages (JSON payloads)
@@ -20,18 +19,13 @@ Frame Types:
 Transfer Flow:
     Sender                          Receiver
     ------                          --------
-    REQ(sid, filename, size, kind, meta) -->
+    REQ(sid, filename, size) -->
                             <--     ACPT(sid) or BUSY/RJCT
     DATA(sid, seq, chunk)    -->
                             <--     ACK(sid, seq)
     ...repeat until done...
     DONE(sid)                -->
                             <--     DONE(sid)
-
-Directory Transfers:
-    Sender packages directory into .tar.gz archive, sends as regular file
-    with kind="dir" and meta={"dir_name": "folder"}. Receiver extracts
-    archive into inbox/<folder_name>/, replacing existing folder if present.
 """
 from __future__ import annotations
 
@@ -61,15 +55,8 @@ class FTv2:
     """
     File transfer protocol version 2 with automatic retries.
 
-    Manages bidirectional file and directory transfers over binary frames with CRC
+    Manages bidirectional file transfers over binary frames with CRC
     validation and automatic retransmission of unacknowledged chunks.
-
-    Features:
-    - Single-file transfers with automatic chunking
-    - Directory transfers via tar.gz packaging
-    - Automatic retry with configurable intervals
-    - Path traversal protection for directory extraction
-    - Collision handling (automatic replacement for directories)
 
     Attributes:
         mgr: ThreadManager instance for sending frames.
@@ -607,24 +594,7 @@ class FTv2:
         self.on_complete("tx", sid, False)
 
     def _finalize_directory_transfer(self, session: Dict[str, Any]) -> bool:
-        """
-        Extract a received directory archive into the inbox.
-
-        Safely extracts the .tar.gz archive, replacing any existing folder with
-        the same name. Validates all archive members to prevent path traversal attacks.
-
-        Args:
-            session: RX session dictionary containing archive path and metadata.
-
-        Returns:
-            bool: True if extraction succeeded, False on any error.
-
-        Notes:
-            - Removes existing target directory before extraction
-            - Validates all archive members stay within target directory
-            - Cleans up archive file and partial extraction on failure
-            - Updates session['path'] to point to extracted directory
-        """
+        """Extract a received archive into the inbox, replacing any existing folder."""
 
         archive_path = session.get("path")
         if not isinstance(archive_path, str):
