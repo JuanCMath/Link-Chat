@@ -1,0 +1,49 @@
+services:
+  gpt:
+    build: .
+    container_name: GPT
+    environment:
+      - NAME=GPT
+      - IFACE=eth0
+      - ETHERTYPE=0x88B5
+      - BEACON_INTERVAL=5
+    cap_add: [ NET_RAW, NET_ADMIN ]
+    networks: [ linknet ]
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./data/GPT:/data
+
+  sebas:
+    build: .
+    container_name: Sebas
+    environment:
+      - NAME=Sebas
+      - IFACE=eth0
+      - ETHERTYPE=0x88B5
+      - BEACON_INTERVAL=5
+    cap_add: [ NET_RAW, NET_ADMIN ]
+    networks: [ linknet ]
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./data/Sebas:/data
+
+  juank:
+    build: .
+    container_name: Juank
+    environment:
+      - NAME=Juank
+      - IFACE=eth0
+      - ETHERTYPE=0x88B5
+      - BEACON_INTERVAL=5
+    cap_add: [ NET_RAW, NET_ADMIN ]
+    networks: [ linknet ]
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./data/Juank:/data
+
+networks:
+  linknet:
+    driver: bridge

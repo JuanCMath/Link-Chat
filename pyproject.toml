@@ -1,36 +1,7 @@
 [project]
-name = "linkchat"
+name = "link-chat2-0"
 version = "0.1.0"
-description = "LinkChat: Mensajería en capa de enlace con GUI PyQt6"
+description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
-keywords = ["networking", "link-layer", "chat", "pyqt6"]
-# Dependencias núcleo (ninguna externa por ahora)
+requires-python = ">=3.13"
 dependencies = []
-
-[project.optional-dependencies]
-# Instalar con: uv add .[gui]
-# o: uv sync --extra gui
-gui = [
-  "PyQt6>=6.6"
-]
-# Desarrollo
-dev = [
-  "pytest>=8.0"
-]
-
-[project.scripts]
-# Ejecutar la GUI: uv run linkchat-gui
-linkchat-gui = "linkchat.app.qt_main:run"
-
-[build-system]
-requires = ["setuptools>=69", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools.packages.find]
-include = ["linkchat*"]
-exclude = ["tests*", "Req*", "docker*"]
-
-[tool.pytest.ini_options]
-addopts = "-q"
-pythonpath = ["."]
