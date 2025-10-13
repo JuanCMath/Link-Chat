@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+  chat1:
+    build:
+      context: ../..
+      dockerfile: docker/testing/Dockerfile.simple
+    container_name: linkchat-chat1
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    networks:
+      linkchat-macvlan:
+        ipv4_address: 172.30.64.97
+    environment:
+      LINKCHAT_INTERFACE: eth0
+      LINKCHAT_NODE: chat1
+    tty: true
+    stdin_open: true
+
+  chat2:
+    build:
+      context: ../..
+      dockerfile: docker/testing/Dockerfile.simple
+    container_name: linkchat-chat2
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    networks:
+      linkchat-macvlan:
+        ipv4_address: 172.30.64.98
+    environment:
+      LINKCHAT_INTERFACE: eth0
+      LINKCHAT_NODE: chat2
+    tty: true
+    stdin_open: true
+
+networks:
+  linkchat-macvlan:
+    external: true

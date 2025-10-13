@@ -68,7 +68,7 @@ docker run -it --rm \
         echo 'MAC: ' \$(cat /sys/class/net/eth0/address)
         echo 'Docker IP: ' \$(ip addr show eth0 | grep 'inet ' | awk '{print \$2}')
         echo
-        echo "Starting Link-Chat (${MODE} mode)."
+        echo "Starting Link-Chat."
         echo
         $START_COMMAND
     "

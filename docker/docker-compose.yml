@@ -1,0 +1,80 @@
+version: "3.9"
+
+x-common-env: &common-env
+  # Ajusta si tu módulo lee estas variables (ej. en tu medium/link layer)
+  INTERFACE: "enp0s3"              # NIC dentro del contenedor
+  ETHERTYPE: "0x88B5"            # tu EtherType (hex o decimal)
+  MODE: "auto"                   # raw | cooked | auto
+  PROMISCUOUS: "true"            # true/false para habilitar modo promiscuo
+  PYTHONUNBUFFERED: "1"
+  QT_QPA_PLATFORM: "offscreen"   # headless
+
+x-common-svc: &common-svc
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: linkchat:latest
+  cap_add:
+    - NET_RAW
+    - NET_ADMIN
+  user: "0:0"                    # root: habilita ioctl/AF_PACKET sin problemas
+  stdin_open: true
+  tty: true
+  networks:
+    linkchat-net: {}
+  depends_on:
+    - netprobe
+  # Montajes opcionales (logs/descargas)
+  volumes:
+    - ./downloads:/app/downloads
+
+services:
+  # Sonda simple para crear la red primero y facilitar diagnósticos
+  netprobe:
+    image: alpine:3.20
+    command: ["sh", "-c", "ip link show && sleep 2h"]
+    networks:
+      linkchat-net: {}
+
+  alice:
+    <<: *common-svc
+    container_name: linkchat-alice
+    hostname: alice
+    environment:
+      <<: *common-env
+      NODE_NAME: "Alice"
+    command: python -m linkchat.app.qt_main
+
+  bob:
+    <<: *common-svc
+    container_name: linkchat-bob
+    hostname: bob
+    environment:
+      <<: *common-env
+      NODE_NAME: "Bob"
+    command: python -m linkchat.app.qt_main
+
+  # (Opcional) Sniffer para depurar tráfico L2 entre Alice y Bob
+  sniffer:
+    image: nicolaka/netshoot:latest
+    container_name: linkchat-sniffer
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    user: "0:0"
+    networks:
+      linkchat-net: {}
+    command: ["sleep", "2h"]
+    # Usa: docker exec -it linkchat-sniffer tcpdump -i eth0 -e -XX ether proto 0x88b5
+
+networks:
+  linkchat-net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+      com.docker.network.bridge.name: "br-linkchat"
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1

@@ -11,8 +11,8 @@ import threading
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from ..medium.af_packet_medium import AFPacketMedium
-from ..mac.csma_persistent import CSMAPersistent
+from .medium.af_packet_medium import AFPacketMedium
+from .csma_persistent import CSMAPersistent
 from .framing import frame_decode, frame_encode
 
 

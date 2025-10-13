@@ -1,0 +1,19 @@
+# Minimal image to run the simple Link-Chat console
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies if needed (iproute2 for ip link, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    iproute2 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml ./
+COPY linkchat/ ./linkchat/
+
+RUN pip install --no-cache-dir -e .
+
+ENV LINKCHAT_INTERFACE=eth0 \
+    PYTHONUNBUFFERED=1
+
+CMD ["python", "-m", "linkchat.app.simple_console"]

@@ -1,0 +1,27 @@
+# Dockerfile for testing with interactive shell
+# Uses pre-built base image for faster builds
+# 
+# First build the base image:
+#   docker build -f docker/base/Dockerfile.base -t linkchat-base:latest .
+#
+# Then build this image:
+#   docker build -f docker/testing/Dockerfile.interactive -t linkchat-interactive .
+
+FROM linkchat-base:latest
+
+LABEL description="Interactive development image for Link-Chat"
+
+# Copy only code files (dependencies already in base image)
+COPY pyproject.toml ./
+COPY linkchat/ ./linkchat/
+
+# Install the package in development mode
+# This is fast because dependencies are already installed
+RUN pip install --no-cache-dir -e .
+
+# Environment variables for testing
+ENV QT_QPA_PLATFORM=offscreen
+ENV INTERFACE=eth0
+
+# Default to interactive shell for testing
+CMD ["/bin/bash"]

@@ -15,12 +15,12 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, List
 
 from .constants import ETHERTYPE_DATA, ETHERTYPE_DISCOVERY
-from .link.af_packet_medium_eth_wifi import AFPacketMediumEthWifi
-from .link.link_layer import FrameType, LinkFrame, LinkLayer
-from .link.message_protocol import MessageProtocol
-from .link.file_transfer import FileTransfer
+from .link.medium.af_packet_medium import AFPacketMedium
+from .link.core.link_layer import FrameType, LinkFrame, LinkLayer
+from .link.core.message_protocol import MessageProtocol
+from .link.transfer.file_transfer import FileTransfer
 from .link.peer_discovery import PeerDiscoveryService, PeerInfo
-from .link.adaptive_params import message_params_from_medium, file_params_from_medium
+from .link.mac.adaptive_params import message_params_from_medium, file_params_from_medium
 
 
 class LinkChatBackend:
@@ -83,7 +83,7 @@ class LinkChatBackend:
         self.on_peer_expired: Optional[Callable[[PeerInfo], None]] = None
         
         # Internal components (initialized in start())
-        self._medium: Optional[AFPacketMediumEthWifi] = None
+        self._medium: Optional[AFPacketMedium] = None
         self._link_layer: Optional[LinkLayer] = None
         self._message_protocol: Optional[MessageProtocol] = None
         self._file_transfer: Optional[FileTransfer] = None
@@ -127,9 +127,8 @@ class LinkChatBackend:
         Returns:
             True if Wi-Fi (hatype == 801), False for Ethernet or if not running.
         """
-        if not self._medium:
-            return False
-        return self._medium.hatype == 801
+        hatype = getattr(self._medium, "hatype", None)
+        return hatype == 801
     
     def start(self) -> None:
         """Initialize and start all networking components.
@@ -213,7 +212,9 @@ class LinkChatBackend:
                 self._link_layer = None
             
             if self._medium:
-                self._medium.close()
+                close_fn = getattr(self._medium, "close", None)
+                if callable(close_fn):
+                    close_fn()
                 self._medium = None
             
             self._message_protocol = None

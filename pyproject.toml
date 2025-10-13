@@ -23,6 +23,7 @@ dev = [
 # Ejecutar la GUI: uv run linkchat-gui
 linkchat-gui = "linkchat.app.qt_main:run"
 linkchat-cli = "linkchat.app.cli_main:main"
+linkchat-simple = "linkchat.app.simple_console:main"
 
 [build-system]
 requires = ["setuptools>=69", "wheel"]

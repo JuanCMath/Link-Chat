@@ -1,0 +1,114 @@
+# Alpine Base Docker image with all Link-Chat dependencies
+# This image should be built once and reused for faster development builds
+# 
+# ⚠️ WARNING: Build time is 40-60 minutes (PyQt6 compilation)
+# But subsequent builds using this base will be ~30 seconds!
+#
+# Build this image first:
+#   docker build -f docker/base/Dockerfile.base.alpine -t linkchat-base-alpine:latest .
+#
+# Then use it in other Dockerfiles with:
+#   FROM linkchat-base-alpine:latest
+#
+# Final size: ~600-700 MB (vs ~800 MB Debian base)
+
+FROM python:3.13-alpine
+
+LABEL maintainer="Link-Chat Team"
+LABEL description="Alpine base image with all Link-Chat dependencies including PyQt6"
+LABEL version="1.0-alpine"
+LABEL build.time="40-60 minutes (one time only)"
+
+# Install all system dependencies for PyQt6 and GUI
+RUN apk add --no-cache \
+    # Build tools (required for compiling PyQt6)
+    gcc \
+    g++ \
+    make \
+    cmake \
+    musl-dev \
+    linux-headers \
+    # Qt6 development packages (for PyQt6 compilation)
+    qt6-qtbase-dev \
+    qt6-qttools-dev \
+    qt6-qtbase-dev-tools \
+    # Qt6 runtime libraries (kept after build)
+    qt6-qtbase \
+    # OpenGL and EGL libraries
+    mesa-dev \
+    mesa-egl \
+    mesa-gl \
+    mesa-gles \
+    # X11 and XCB libraries
+    libx11-dev \
+    libx11 \
+    libxcb-dev \
+    libxcb \
+    xcb-util-dev \
+    xcb-util \
+    xcb-util-image-dev \
+    xcb-util-image \
+    xcb-util-keysyms-dev \
+    xcb-util-keysyms \
+    xcb-util-renderutil-dev \
+    xcb-util-renderutil \
+    xcb-util-wm-dev \
+    xcb-util-wm \
+    libxkbcommon-dev \
+    libxkbcommon \
+    libxkbcommon-x11 \
+    # Additional GUI dependencies
+    dbus-dev \
+    dbus-libs \
+    fontconfig-dev \
+    fontconfig \
+    freetype-dev \
+    freetype \
+    # Fonts
+    ttf-dejavu \
+    ttf-liberation \
+    # Network tools
+    net-tools \
+    iproute2 \
+    iputils \
+    tcpdump \
+    ethtool \
+    # Development utilities
+    bash \
+    vim \
+    nano \
+    less \
+    curl \
+    wget \
+    git
+
+RUN which qmake || echo "qmake not found"
+
+# Install Python dependencies
+# PyQt6 compilation takes the longest (30-40 minutes)
+RUN echo "Installing SIP and PyQt6-sip (5 min)..." && \
+    pip install --no-cache-dir sip PyQt6-sip && \
+    echo "Compiling PyQt6 from source (30-40 min)..." && \
+    pip install --no-cache-dir PyQt6>=6.6 && \
+    echo "Installing pytest tools (2 min)..." && \
+    pip install --no-cache-dir \
+    pytest>=8.0 \
+    pytest-cov \
+    pytest-timeout
+
+# Set default working directory
+WORKDIR /app
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV QT_QPA_PLATFORM=xcb
+
+# Create common directories
+RUN mkdir -p /app/downloads /app/logs
+
+# Note: We keep build dependencies in the base image
+# They will be removed in derived production images to reduce size
+
+# Default command
+CMD ["/bin/bash"]

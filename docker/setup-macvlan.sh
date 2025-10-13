@@ -32,12 +32,8 @@ echo "Detecting host network configuration..."
 echo
 
 # Get default interface
-DEFAULT_IFACE=$(ip route | grep default | head -n1 | awk '{print $5}')
-if [ -z "$DEFAULT_IFACE" ]; then
-    echo "Could not detect default network interface."
-    echo "Enter it manually (e.g., eth0, enp3s0)."
-    read -p "Interface name (e.g., eth0, wlan0): " DEFAULT_IFACE
-fi
+DEFAULT_IFACE=""
+read -p "Interface name (e.g., eth0, wlan0): " DEFAULT_IFACE
 
 # Get default gateway
 DEFAULT_GW=$(ip route | grep default | head -n1 | awk '{print $3}')

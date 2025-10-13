@@ -5,19 +5,20 @@ including CSMA collision avoidance, framing, reliable transfers, file
 chunking, and raw socket interfaces.
 
 Main Components:
-    - AFPacketMediumEthWifi: Low-level AF_PACKET socket interface
+    - AFPacketMedium: Basic AF_PACKET socket interface
     - CSMAPersistent: CSMA/CA medium access control
     - LinkLayer: Frame assembly/disassembly and routing
     - FileTransfer: File and folder transfer with chunking
     - ReliableTransfer: ACK-based reliability layer
 
 Example:
-    >>> from linkchat.link import AFPacketMediumEthWifi, LinkLayer
-    >>> medium = AFPacketMediumEthWifi(interface="eth0")
+    >>> from linkchat.link import AFPacketMedium, LinkLayer
+    >>> medium = AFPacketMedium(interface="eth0")
     >>> layer = LinkLayer(medium)
     >>> layer.start()
 """
 
+from .medium.af_packet_medium import AFPacketMedium
 from .medium.af_packet_medium_eth_wifi import AFPacketMediumEthWifi
 from .mac.csma_persistent import CSMAPersistent
 from .core.link_layer import LinkLayer, FrameType, LinkFrame
@@ -27,6 +28,7 @@ from .peer_discovery import PeerInfo, PeerDiscoveryService
 from .core.message_protocol import MessageProtocol
 
 __all__ = [
+    "AFPacketMedium",
     "AFPacketMediumEthWifi",
     "CSMAPersistent",
     "LinkLayer",

@@ -1,0 +1,37 @@
+FROM pyqt6-base:latest
+
+LABEL maintainer="Link-Chat Team"
+LABEL description="Link-Chat image with all dependencies including PyQt6"
+LABEL version="1.0"
+LABEL base.image="pyqt6-base:latest"
+
+# Set default working directory
+WORKDIR /app
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV QT_QPA_PLATFORM=xcb
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    net-tools \
+    iproute2 \
+    iputils-ping \
+    tcpdump \
+    ethtool \
+    bash \
+    vim \
+    nano \
+    less \
+    curl \
+    wget \
+    git \
+    fonts-dejavu-core \
+    fonts-liberation && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create app directories
+RUN mkdir -p /app/downloads /app/logs
+
+# Default command
+CMD ["/bin/bash"]

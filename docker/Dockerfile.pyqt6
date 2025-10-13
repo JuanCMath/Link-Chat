@@ -1,0 +1,22 @@
+FROM python:3.13-slim
+
+# Install Qt / GUI dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    qtbase5-dev \
+    qttools5-dev-tools \
+    libxcb-xinerama0-dev \
+    libxkbcommon-x11-0 \
+    dbus-x11 \
+    fonts-dejavu \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python deps (including PyQt6)
+RUN pip install --no-cache-dir \
+    sip \
+    PyQt6>=6.6 \
+    pytest>=8.0 \
+    pytest-cov \
+    pytest-timeout
+
+WORKDIR /app
+CMD ["bash"]

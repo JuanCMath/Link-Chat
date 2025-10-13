@@ -19,7 +19,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
-from .medium.af_packet_medium_eth_wifi import AFPacketMediumEthWifi
+from .medium.af_packet_medium import AFPacketMedium
 
 # Protocol constants
 MAGIC = b"LCD"  # Link-Chat Discovery magic header
@@ -95,7 +95,7 @@ class PeerDiscoveryService:
         self.on_peer_expired = on_peer_expired
         self._metadata: Dict[str, str] = {}
         self._services: Set[str] = set()
-        self._medium: Optional[AFPacketMediumEthWifi] = None
+        self._medium: Optional[AFPacketMedium] = None
         self._rx_thread: Optional[threading.Thread] = None
         self._tx_thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
@@ -158,12 +158,11 @@ class PeerDiscoveryService:
         if self._medium is not None:
             return
         self._stop.clear()
-        # Create raw packet medium in promiscuous mode to see all discovery traffic
-        self._medium = AFPacketMediumEthWifi(
+    # Create raw packet medium for discovery traffic
+        self._medium = AFPacketMedium(
             iface=self.interface,
             ethertype=self.ethertype,
             filter_ethertype=True,
-            enable_promiscuous=True,
         )
         # Launch sender and receiver worker threads
         self._tx_thread = threading.Thread(target=self._beacon_loop, daemon=True)
@@ -188,7 +187,9 @@ class PeerDiscoveryService:
         # Close the medium and clear peer table
         medium, self._medium = self._medium, None
         if medium:
-            medium.close()
+            close_fn = getattr(medium, "close", None)
+            if callable(close_fn):
+                close_fn()
         with self._lock:
             expired = list(self._peers.values())
             self._peers.clear()
