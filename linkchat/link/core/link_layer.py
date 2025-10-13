@@ -145,6 +145,7 @@ class LinkLayer:
         with self._lock:
             self._tx_dst = dst
             try:
+                print("LinkLayer send typ", typ, "dst", dst.hex(), "seq", seq)
                 self.csma.send(frame)
             finally:
                 self._tx_dst = None

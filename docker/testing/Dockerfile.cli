@@ -1,0 +1,20 @@
+# Minimal image to run the Link-Chat CLI console
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    iproute2 \
+    tcpdump \
+    iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml ./
+COPY linkchat/ ./linkchat/
+
+RUN pip install --no-cache-dir -e .
+
+ENV LINKCHAT_INTERFACE=eth0 \
+    PYTHONUNBUFFERED=1
+
+CMD ["python", "-m", "linkchat.app.cli_main"]

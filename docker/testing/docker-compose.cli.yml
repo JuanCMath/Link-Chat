@@ -1,0 +1,42 @@
+services:
+  cli1:
+    build:
+      context: ../..
+      dockerfile: docker/testing/Dockerfile.cli
+    container_name: linkchat-cli1
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      LINKCHAT_INTERFACE: eth0
+      LINKCHAT_NODE: cli1
+    networks:
+      linkchat-macvlan:
+        ipv4_address: 172.30.64.97
+    stdin_open: true
+    tty: true
+    volumes:
+      - ../../share:/share:ro
+
+  cli2:
+    build:
+      context: ../..
+      dockerfile: docker/testing/Dockerfile.cli
+    container_name: linkchat-cli2
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      LINKCHAT_INTERFACE: eth0
+      LINKCHAT_NODE: cli2
+    networks:
+      linkchat-macvlan:
+        ipv4_address: 172.30.64.98
+    stdin_open: true
+    tty: true
+    volumes:
+      - ../../share:/share:ro
+
+networks:
+  linkchat-macvlan:
+    external: true

@@ -322,13 +322,16 @@ class LinkChatBackend:
         """
         if frame.typ == FrameType.MESSAGE:
             if self._message_protocol:
+                print("Routing MESSAGE frame")
                 self._message_protocol.handle_frame(frame)
         elif frame.typ == FrameType.ACK:
             # ACK frames must be routed to both message and file protocols
             # since both use ACKs with different payload formats
             if self._message_protocol:
+                print("Routing ACK frame")
                 self._message_protocol.handle_frame(frame)
             if self._file_transfer:
+                print("routing file frame")
                 self._file_transfer.handle_received_frame(frame)
         elif frame.typ in (FrameType.TRANSFER_META, FrameType.FILE_CHUNK):
             if self._file_transfer:
