@@ -407,21 +407,26 @@ class PeerDiscovery:
 
     def _broadcast_loop(self) -> None:
         """
-        Background thread: periodically broadcast beacon.
+        Background thread: broadcast beacon up to 5 times with 5-second intervals.
 
-        Runs until stop_event is set. Broadcasts local identity and sleeps
-        for the configured interval. Exceptions during broadcast are silently
-        ignored to keep the loop running.
+        Runs until stop_event is set or 5 broadcasts have been sent. Broadcasts 
+        local identity and sleeps for 5 seconds between transmissions. Exceptions 
+        during broadcast are silently ignored to keep the loop running.
         """
-        while not self._stop_event.is_set():
+        broadcast_count = 0
+        max_broadcasts = 5
+        
+        while not self._stop_event.is_set() and broadcast_count < max_broadcasts:
             try:
                 self.send_beacon()
+                broadcast_count += 1
             except Exception:
                 # Silently ignore broadcast errors (network down, etc.)
                 pass
 
-            # Sleep until next broadcast (or stop signal)
-            self._stop_event.wait(self.broadcast_interval)
+            # Sleep for 5 seconds until next broadcast (or stop signal)
+            if broadcast_count < max_broadcasts:
+                self._stop_event.wait(5.0)
 
     def send_beacon(self) -> None:
         """
