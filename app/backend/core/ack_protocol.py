@@ -18,7 +18,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from .frame_helper import encode_frame, decode_frame, CRCError, FramingError
+from ..utils.frame_helper import encode_frame, decode_frame, CRCError, FramingError
 
 # Frame type for ACK packets
 TYPE_ACK = 0x12

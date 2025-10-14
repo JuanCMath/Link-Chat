@@ -15,15 +15,17 @@ Architecture:
     without duplicating network code.
 
 Components Managed:
-    - SocketManager: Raw Ethernet socket handling
-    - ThreadManager: Frame RX/TX/Dispatch coordination
-    - PeerRegistry: Peer database with JSON persistence
-    - PeerDiscovery: Automatic beacon-based discovery
-    - FTv2: File and directory transfer protocol
-    - AckRetryManager: Message acknowledgment and retries
+    - SocketManager: Raw Ethernet socket handling (core.raw_socket)
+    - ThreadManager: Frame RX/TX/Dispatch coordination (core.service_threads)
+    - PeerRegistry: Peer database with JSON persistence (peer_management.peer_registry)
+    - PeerDiscovery: Automatic beacon-based discovery (peer_management.peer_discovery)
+    - FTv2: File and directory transfer protocol (core.file_transfer)
+    - AckRetryManager: Message acknowledgment and retries (core.ack_protocol)
 
 Example:
-    >>> from app.core.config import load_config
+    >>> from app.backend.core.config import load_config
+    >>> from app.backend.app_facade import LinkChatApp
+    >>> 
     >>> config = load_config()
     >>> app = LinkChatApp(config)
     >>> app.start()
@@ -35,19 +37,26 @@ import os
 import uuid
 from typing import Callable, Dict, List, Optional
 
-from ..ack_protocol import ACK_KIND_DATA, ACK_KIND_MSG, AckRetryManager
-from ..file_transfer import FTv2
-from ..peer_management import PeerDiscovery, PeerRegistry
-from ..peer_models import Peer
-from ..peer_store import JSONPeerStore
-from ..raw_socket import SocketManager
-from ..service_threads import ThreadManager, mac_bytes_to_str, mac_str_to_bytes
-from .config import LinkChatConfig
-from .services import (
+from .core.ack_protocol import ACK_KIND_DATA, ACK_KIND_MSG, AckRetryManager
+from .core.file_transfer import FTv2
+from .core.raw_socket import SocketManager
+from .core.config import LinkChatConfig
+from .core.service_threads import ThreadManager
+
+from .peer_management.peer_discovery import PeerDiscovery
+from .peer_management.peer_registry import PeerRegistry
+from .peer_management.peer_models import Peer
+from .peer_management.peer_store import JSONPeerStore
+
+from .utils.services import (
     create_directory_archive,
     pop_pending_archive,
     resolve_mac,
-    track_pending_archive,
+    track_pending_archive
+)
+from .utils.mac_utils import (
+    mac_bytes_to_str,
+    mac_str_to_bytes
 )
 
 
@@ -655,7 +664,7 @@ class LinkChatApp:
             return
 
         if len(payload) >= 2 and (payload[0] == 0x7E or payload[-1] == 0x7E):
-            from file_transfer import debug_inspect_frame
+            from .utils.frame_helper import debug_inspect_frame
 
             debug_inspect_frame(payload)
             self._emit(f"[warn] 0x7E frame not handled by FT (len={len(payload)})")

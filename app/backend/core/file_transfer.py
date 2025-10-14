@@ -41,7 +41,7 @@ import threading
 import uuid
 from typing import Any, Callable, Dict, Optional
 
-from .frame_helper import CRCError, FramingError, decode_frame, encode_frame
+from ..utils.frame_helper import CRCError, FramingError, decode_frame, encode_frame
 from .ack_protocol import (
     TYPE_ACK,
     ACK_KIND_DATA,
@@ -741,53 +741,3 @@ class FTv2:
                 self._ack_cb(kind, src_mac, data)
             except Exception:
                 pass
-
-
-# Debug utilities -----------------------------------------------------
-
-
-def debug_inspect_frame(payload: bytes) -> None:
-    """
-    Debug helper to inspect frame structure.
-
-    Prints detailed breakdown of: TYPE, SEQ, LEN, CRC received vs calculated.
-
-    Args:
-        payload: Raw frame bytes including 0x7E flags.
-    """
-    from .frame_helper import bytes_to_bits, bit_unstuff, bits_to_bytes, crc16_ccitt_checksum
-    import struct
-
-    if not (payload and payload[0] == 0x7E and payload[-1] == 0x7E):
-        print("[ft/dbg] no 0x7E flags at boundaries", flush=True)
-        return
-
-    segment = payload[1:-1]
-    try:
-        bits = bytes_to_bits(segment)
-        unstuff = bit_unstuff(bits)
-    except Exception as e:
-        print(f"[ft/dbg] bit_unstuff failed: {e}", flush=True)
-        return
-
-    raw = bits_to_bytes(unstuff)
-    print(f"[ft/dbg] raw_len={len(raw)} raw_prefix={raw[:8].hex()}", flush=True)
-
-    if len(raw) < 6:
-        print("[ft/dbg] raw too short", flush=True)
-        return
-
-    typ, seq, length = struct.unpack("!BBH", raw[0:4])
-    if len(raw) != 4 + length + 2:
-        print(
-            f"[ft/dbg] length mismatch raw={len(raw)} expected={4+length+2}",
-            flush=True,
-        )
-        return
-
-    crc_recv = int.from_bytes(raw[4 + length : 4 + length + 2], "big")
-    crc_calc = crc16_ccitt_checksum(raw[0 : 4 + length])
-    print(
-        f"[ft/dbg] TYPE=0x{typ:02x} SEQ={seq} LEN={length} CRC recv=0x{crc_recv:04x} calc=0x{crc_calc:04x}",
-        flush=True,
-    )

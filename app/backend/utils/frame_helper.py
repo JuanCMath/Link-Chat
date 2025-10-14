@@ -31,7 +31,7 @@ Typical Usage:
 """
 
 import struct
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import os, binascii, struct
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
@@ -468,3 +468,107 @@ def decode_frame(stream: bytes) -> Tuple[int, int, bytes]:
         raise last_exception
     raise FramingError("No valid frame decoded from stream")
 
+
+def debug_inspect_frame(payload: bytes) -> None:
+    """
+    Debug helper to inspect frame structure.
+
+    Prints detailed breakdown of: TYPE, SEQ, LEN, CRC received vs calculated.
+
+    Args:
+        payload: Raw frame bytes including 0x7E flags.
+    """
+    
+
+    if not (payload and payload[0] == 0x7E and payload[-1] == 0x7E):
+        print("[ft/dbg] no 0x7E flags at boundaries", flush=True)
+        return
+
+    segment = payload[1:-1]
+    try:
+        bits = bytes_to_bits(segment)
+        unstuff = bit_unstuff(bits)
+    except Exception as e:
+        print(f"[ft/dbg] bit_unstuff failed: {e}", flush=True)
+        return
+
+    raw = bits_to_bytes(unstuff)
+    print(f"[ft/dbg] raw_len={len(raw)} raw_prefix={raw[:8].hex()}", flush=True)
+
+    if len(raw) < 6:
+        print("[ft/dbg] raw too short", flush=True)
+        return
+
+    typ, seq, length = struct.unpack("!BBH", raw[0:4])
+    if len(raw) != 4 + length + 2:
+        print(
+            f"[ft/dbg] length mismatch raw={len(raw)} expected={4+length+2}",
+            flush=True,
+        )
+        return
+
+    crc_recv = int.from_bytes(raw[4 + length : 4 + length + 2], "big")
+    crc_calc = crc16_ccitt_checksum(raw[0 : 4 + length])
+    print(
+        f"[ft/dbg] TYPE=0x{typ:02x} SEQ={seq} LEN={length} CRC recv=0x{crc_recv:04x} calc=0x{crc_calc:04x}",
+        flush=True,
+    )
+
+    
+def pack_ethernet_frame(
+    dst_mac: bytes, src_mac: bytes, ethertype: int, payload: bytes
+) -> bytes:
+    """
+    Construct a complete Ethernet frame from components.
+
+    Builds the standard Ethernet II frame format:
+    [DST_MAC(6)] [SRC_MAC(6)] [ETHERTYPE(2)] [PAYLOAD(variable)]
+
+    Args:
+        dst_mac: Destination MAC address (6 bytes).
+        src_mac: Source MAC address (6 bytes).
+        ethertype: EtherType field (0x0800-0xFFFF).
+        payload: Frame payload data.
+
+    Returns:
+        bytes: Complete Ethernet frame ready for transmission.
+
+    Example:
+        >>> frame = pack_ethernet_frame(
+        ...     b'\\xff\\xff\\xff\\xff\\xff\\xff',  # broadcast
+        ...     b'\\x08\\x00\\'*\\x4a\\x5b\\x6c',
+        ...     0x88B5,
+        ...     b'Hello'
+        ... )
+    """
+    return dst_mac + src_mac + ethertype.to_bytes(2, "big") + payload
+
+
+def unpack_ethernet_frame(frame: bytes) -> Optional[Tuple[bytes, bytes, int, bytes]]:
+    """
+    Parse an Ethernet frame into its constituent parts.
+
+    Extracts fields from Ethernet II format:
+    [DST_MAC(6)] [SRC_MAC(6)] [ETHERTYPE(2)] [PAYLOAD(variable)]
+
+    Args:
+        frame: Complete Ethernet frame bytes.
+
+    Returns:
+        Optional[Tuple[bytes, bytes, int, bytes]]: Tuple of (dst_mac, src_mac,
+            ethertype, payload), or None if frame is too short.
+
+    Example:
+        >>> dst, src, etype, payload = unpack_ethernet_frame(frame)
+        >>> mac_bytes_to_str(src)
+        '08:00:27:4a:5b:6c'
+    """
+    if len(frame) < 14:  # Minimum Ethernet frame header size
+        return None
+
+    dst_mac = frame[0:6]
+    src_mac = frame[6:12]
+    ethertype = int.from_bytes(frame[12:14], "big")
+    payload = frame[14:]
+
+    return dst_mac, src_mac, ethertype, payload

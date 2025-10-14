@@ -1,23 +1,37 @@
 """
-LinkChat Application Package
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+LinkChat Application
+~~~~~~~~~~~~~~~~~~~~
 
-A peer-to-peer messaging and file transfer system using raw Ethernet frames.
+Peer-to-peer messaging and file transfer system over raw Ethernet.
 
-This package provides a complete P2P networking stack operating at Layer 2
-(Data Link Layer) without requiring IP addresses or TCP/IP protocols.
+LinkChat is a Layer 2 networking application that enables direct peer-to-peer
+communication without IP addresses or TCP/IP stack dependencies. It operates
+directly on Ethernet frames for maximum efficiency and minimal overhead.
 
 Package Structure:
-    - raw_socket: Low-level raw Ethernet socket handling
-    - frame_helper: Frame encoding/decoding with CRC validation
-    - service_threads: Multithreaded frame RX/TX/Dispatch coordination
-    - peer_models: Data models for peer representation
-    - peer_store: Persistence layer with Protocol pattern
-    - peer_discovery: Automatic peer discovery via beacons
-    - ack_protocol: ACK-based retry management
-    - file_transfer: Reliable file and directory transfers
-    - core/: Configuration and application facade
-    - frontend/: User interface implementations
+    backend/
+        core/
+            - raw_socket: Low-level Ethernet socket handling (AF_PACKET)
+            - service_threads: Multithreaded RX/TX/Dispatch coordination
+            - ack_protocol: Reliable delivery with automatic retries
+            - file_transfer: File and directory transfer protocol (FTv2)
+            - config: Environment-based configuration management
+
+        peer_management/
+            - peer_models: Dataclass definitions for peers
+            - peer_store: JSON persistence layer
+            - peer_registry: Thread-safe in-memory peer database
+            - peer_discovery: Automatic beacon-based discovery
+
+        utils/
+            - frame_helper: CRC16-CCITT validation and bit stuffing
+            - mac_utils: MAC address conversion and validation
+            - services: Archive creation and helper utilities
+
+        app_facade.py: High-level application facade
+
+    frontend/
+        console.py: Interactive command-line interface (REPL)
 
 Key Features:
     - Layer 2 Ethernet communication (no IP required)
@@ -27,10 +41,12 @@ Key Features:
     - File and directory transfer with chunking
     - Directory transfers via tar.gz packaging
     - JSON-based peer persistence
+    - Broadcast messaging to all peers
+    - Graceful shutdown with peer notifications
 
 Example Usage:
-    >>> from app.core.config import load_config
-    >>> from app.core.app_facade import LinkChatApp
+    >>> from app.backend.core.config import load_config
+    >>> from app.backend.app_facade import LinkChatApp
     >>> from app.frontend.console import ConsoleFrontend
     >>> 
     >>> config = load_config()
@@ -39,15 +55,17 @@ Example Usage:
     >>> console.run()
 
 Architecture:
-    The application follows a layered architecture:
+    The application follows a clean layered architecture:
     
     Frontend Layer (console.py)
          ↓
     Facade Layer (app_facade.py)
          ↓
-    Service Layer (discovery, file_transfer, ack_protocol)
+    Service Layer (peer_discovery, file_transfer, ack_protocol)
          ↓
     Transport Layer (service_threads.py)
+         ↓
+    Socket Layer (raw_socket.py)
          ↓
     Socket Layer (raw_socket.py)
 

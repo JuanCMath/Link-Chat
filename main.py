@@ -51,8 +51,8 @@ Note:
     The application requires raw socket privileges (CAP_NET_RAW on Linux or
     root/administrator access). Docker deployments handle this automatically.
 """
-from app.core.app_facade import LinkChatApp
-from app.core.config import load_config
+from app.backend.app_facade import LinkChatApp
+from app.backend.core.config import load_config
 from app.frontend.console import ConsoleFrontend
 
 

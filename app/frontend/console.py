@@ -33,7 +33,7 @@ Example:
 import sys
 import time
 
-from ..core.app_facade import LinkChatApp
+from ..backend.app_facade import LinkChatApp
 
 
 class ConsoleFrontend:
@@ -72,11 +72,6 @@ class ConsoleFrontend:
 
         Args:
             app: Configured LinkChatApp instance ready to start.
-
-        Example:
-            >>> config = load_config()
-            >>> app = LinkChatApp(config)
-            >>> frontend = ConsoleFrontend(app)
         """
         self.app = app
         self.running = True

@@ -25,105 +25,11 @@ import logging
 import queue
 import threading
 import time
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 
 from .raw_socket import SocketManager
-
-# Broadcast MAC address (FF:FF:FF:FF:FF:FF)
-BROADCAST_MAC_BYTES = b"\xff\xff\xff\xff\xff\xff"
-
-
-def mac_str_to_bytes(mac_address: str) -> bytes:
-    """
-    Convert MAC address from colon-separated string to bytes.
-
-    Args:
-        mac_address: MAC in format "AA:BB:CC:DD:EE:FF" (case-insensitive).
-
-    Returns:
-        bytes: 6-byte MAC address.
-
-    Example:
-        >>> mac_str_to_bytes("08:00:27:4a:5b:6c")
-        b'\\x08\\x00\\'*\\x4a\\x5b\\x6c'
-    """
-    return bytes(int(part, 16) for part in mac_address.split(":"))
-
-
-def mac_bytes_to_str(mac_bytes: bytes) -> str:
-    """
-    Convert MAC address from bytes to colon-separated lowercase string.
-
-    Args:
-        mac_bytes: 6-byte MAC address.
-
-    Returns:
-        str: MAC in format "aa:bb:cc:dd:ee:ff".
-
-    Example:
-        >>> mac_bytes_to_str(b'\\x08\\x00\\'*\\x4a\\x5b\\x6c')
-        '08:00:27:4a:5b:6c'
-    """
-    return ":".join(f"{byte:02x}" for byte in mac_bytes)
-
-
-def pack_ethernet_frame(
-    dst_mac: bytes, src_mac: bytes, ethertype: int, payload: bytes
-) -> bytes:
-    """
-    Construct a complete Ethernet frame from components.
-
-    Builds the standard Ethernet II frame format:
-    [DST_MAC(6)] [SRC_MAC(6)] [ETHERTYPE(2)] [PAYLOAD(variable)]
-
-    Args:
-        dst_mac: Destination MAC address (6 bytes).
-        src_mac: Source MAC address (6 bytes).
-        ethertype: EtherType field (0x0800-0xFFFF).
-        payload: Frame payload data.
-
-    Returns:
-        bytes: Complete Ethernet frame ready for transmission.
-
-    Example:
-        >>> frame = pack_ethernet_frame(
-        ...     b'\\xff\\xff\\xff\\xff\\xff\\xff',  # broadcast
-        ...     b'\\x08\\x00\\'*\\x4a\\x5b\\x6c',
-        ...     0x88B5,
-        ...     b'Hello'
-        ... )
-    """
-    return dst_mac + src_mac + ethertype.to_bytes(2, "big") + payload
-
-
-def unpack_ethernet_frame(frame: bytes) -> Optional[Tuple[bytes, bytes, int, bytes]]:
-    """
-    Parse an Ethernet frame into its constituent parts.
-
-    Extracts fields from Ethernet II format:
-    [DST_MAC(6)] [SRC_MAC(6)] [ETHERTYPE(2)] [PAYLOAD(variable)]
-
-    Args:
-        frame: Complete Ethernet frame bytes.
-
-    Returns:
-        Optional[Tuple[bytes, bytes, int, bytes]]: Tuple of (dst_mac, src_mac,
-            ethertype, payload), or None if frame is too short.
-
-    Example:
-        >>> dst, src, etype, payload = unpack_ethernet_frame(frame)
-        >>> mac_bytes_to_str(src)
-        '08:00:27:4a:5b:6c'
-    """
-    if len(frame) < 14:  # Minimum Ethernet frame header size
-        return None
-
-    dst_mac = frame[0:6]
-    src_mac = frame[6:12]
-    ethertype = int.from_bytes(frame[12:14], "big")
-    payload = frame[14:]
-
-    return dst_mac, src_mac, ethertype, payload
+from ..utils.mac_utils import BROADCAST_MAC_BYTES, mac_str_to_bytes
+from ..utils.frame_helper import pack_ethernet_frame, unpack_ethernet_frame
 
 class ThreadManager:
     """

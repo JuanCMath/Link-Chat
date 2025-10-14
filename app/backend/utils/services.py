@@ -26,10 +26,8 @@ import tarfile
 import tempfile
 from typing import Dict, Optional
 
-from ..peer_management import PeerRegistry
-
-# Regex pattern for validating MAC address format
-MAC_ADDRESS_PATTERN = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
+from .mac_utils import MAC_ADDRESS_PATTERN
+from ..peer_management.peer_registry import PeerRegistry
 
 # Module-level tracking of temporary archives pending cleanup
 # Maps session ID -> temporary file path
