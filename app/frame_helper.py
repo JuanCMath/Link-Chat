@@ -32,6 +32,8 @@ Typical Usage:
 
 import struct
 from typing import List, Tuple
+import os, binascii, struct
+from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
 # Frame delimiter byte (01111110 binary)
 FLAG_BYTE = 0x7E
@@ -53,6 +55,15 @@ class CRCError(FrameError):
     """Raised when CRC validation fails, indicating corrupted data."""
 
     pass
+
+
+_NONCE_LEN = 12
+_key_hex = os.getenv("LINKCHAT_PSK", "")
+_key = binascii.unhexlify(_key_hex) if _key_hex else b"\x00"*32  # <-- cambia en prod
+if len(_key) != 32: raise ValueError("LINKCHAT_PSK debe ser hex de 32 bytes (64 chars).")
+_AEAD = ChaCha20Poly1305(_key)
+# ------------------------------------------------------
+
 
 
 def crc16_ccitt_checksum(data: bytes, polynomial: int = 0x1021, initial_value: int = 0xFFFF) -> int:
@@ -304,36 +315,43 @@ def _parse_payload_section(data: bytes) -> Tuple[int, int, bytes]:
 
 def encode_frame(payload: bytes, frame_type: int = 1, seq: int = 0) -> bytes:
     """
-    Encode payload into a complete frame with flags, stuffing, and CRC.
-
-    This is the main encoding function. It:
-    1. Builds the payload section with CRC
-    2. Converts to bits and applies bit stuffing
-    3. Wraps with FLAG bytes
-
+    Encode a payload into a framed format with AEAD encryption, CRC validation, and bit stuffing.
+    This function takes a raw payload and encodes it into a secure frame format by:
+    1. Encrypting the payload using AEAD (Authenticated Encryption with Associated Data)
+    2. Adding CRC validation for integrity checking
+    3. Applying bit stuffing to prevent flag byte conflicts
+    4. Wrapping the result with flag bytes for frame delineation
     Args:
-        payload: Data to transmit.
-        frame_type: Frame type identifier (default: 1).
-        seq: Sequence number (default: 0).
-
+        payload (bytes): The raw data to be encoded and transmitted
+        frame_type (int, optional): Type identifier for the frame (0-255). Defaults to 1.
+        seq (int, optional): Sequence number for the frame (0-255). Defaults to 0.
     Returns:
-        bytes: Complete frame ready for transmission: [FLAG][stuffed data][FLAG]
-
-    Example:
-        >>> frame = encode_frame(b"Hello World", frame_type=0x10, seq=5)
-        >>> frame[0] == 0x7E and frame[-1] == 0x7E
-        True
+        bytes: The complete encoded frame ready for transmission, including:
+               - Leading flag byte
+               - Bit-stuffed encrypted payload with CRC
+               - Trailing flag byte
+    Note:
+        - Uses a random nonce for each encryption operation
+        - Frame type and sequence number are used as Additional Authenticated Data (AAD)
+        - The encrypted payload includes both ciphertext and authentication tag
+        - Bit stuffing prevents accidental flag byte occurrences in the data
     """
-    # Build section with CRC
-    section = _build_payload_section(frame_type, seq, payload)
 
-    # Convert to bits and apply stuffing
+    # --- NUEVO: cifrado AEAD ---
+    nonce = os.urandom(_NONCE_LEN)
+    aad = struct.pack("!BB", frame_type & 0xFF, seq & 0xFF)
+    ct_and_tag = _AEAD.encrypt(nonce, payload, aad)
+    enc_payload = nonce + ct_and_tag
+
+    # Build section con CRC como siempre (sobre datos cifrados)
+    section = _build_payload_section(frame_type, seq, enc_payload)
+
+    # Bit stuffing y flags como antes
     bits = bytes_to_bits(section)
     stuffed_bits = bit_stuff(bits)
     stuffed_bytes = bits_to_bytes(stuffed_bits)
-
-    # Wrap with flags
     return bytes([FLAG_BYTE]) + stuffed_bytes + bytes([FLAG_BYTE])
+
 
 
 def _find_flag_boundaries(stream: bytes) -> List[Tuple[int, int]]:
@@ -375,33 +393,31 @@ def _find_flag_boundaries(stream: bytes) -> List[Tuple[int, int]]:
 
 def decode_frame(stream: bytes) -> Tuple[int, int, bytes]:
     """
-    Decode a frame from a byte stream, validating CRC and unstuffing.
-
-    This is the main decoding function. It:
-    1. Finds FLAG-delimited frame boundaries
-    2. Attempts to unstuff each candidate frame
-    3. Validates CRC and extracts payload
-    4. Returns the first valid frame found
-
+    Decode a framed message from a byte stream with AEAD decryption.
+    This function processes a byte stream to extract and decode framed messages.
+    It performs the following operations:
+    1. Locates frame boundaries using FLAG bytes
+    2. Performs bit unstuffing to recover the original frame
+    3. Parses the frame header (type, sequence, payload length)
+    4. Decrypts the payload using AEAD (Authenticated Encryption with Associated Data)
+       - Extracts nonce (first 12 bytes) and ciphertext+tag from encrypted payload
+       - Uses frame type and sequence number as Additional Authenticated Data (AAD)
     Args:
-        stream: Raw bytes containing one or more frames.
-
+        stream (bytes): Raw byte stream containing one or more framed messages
     Returns:
-        Tuple[int, int, bytes]: (frame_type, seq, payload) of first valid frame.
-
+        Tuple[int, int, bytes]: A tuple containing:
+            - frame_type (int): Type identifier of the decoded frame
+            - seq (int): Sequence number of the frame
+            - payload (bytes): Decrypted payload data
     Raises:
-        FramingError: If no valid frame boundaries found or all frames invalid.
-        CRCError: If all candidate frames fail CRC validation.
-
+        FramingError: When no frame boundaries are found in the stream or
+                     no valid frame can be decoded
+        FrameError: When bit unstuffing fails or encrypted payload is too short
+                   (minimum 28 bytes: 12 bytes nonce + 16 bytes tag)
     Note:
-        Automatically handles padding added during bit-to-byte conversion by
-        trimming to expected length based on the LENGTH field.
-
-    Example:
-        >>> frame = encode_frame(b"Test", frame_type=0x10, seq=3)
-        >>> frame_type, seq, payload = decode_frame(frame)
-        >>> payload
-        b'Test'
+        The function attempts to decode multiple potential frames in the stream
+        and returns the first successfully decoded frame. If all attempts fail,
+        it raises the last encountered exception.
     """
     boundary_pairs = _find_flag_boundaries(stream)
     if not boundary_pairs:
@@ -409,11 +425,9 @@ def decode_frame(stream: bytes) -> Tuple[int, int, bytes]:
 
     last_exception = None
 
-    # Try each potential frame
     for start_index, end_index in boundary_pairs:
         stuffed_segment = stream[start_index : end_index + 1]
 
-        # Attempt to unstuff
         try:
             stuffed_bits = bytes_to_bits(stuffed_segment)
             unstuffed_bits = bit_unstuff(stuffed_bits)
@@ -423,28 +437,34 @@ def decode_frame(stream: bytes) -> Tuple[int, int, bytes]:
 
         raw_bytes = bits_to_bytes(unstuffed_bits)
 
-        # Smart trimming: remove padding based on LENGTH field
-        # This handles padding added during bits_to_bytes conversion
+        # Recorte inteligente basado en LENGTH
         if len(raw_bytes) >= 4:
             try:
-                frame_type, seq, payload_length = struct.unpack("!BBH", raw_bytes[0:4])
-                expected_section_length = 4 + payload_length + 2  # header + payload + CRC
-
+                ftype_tmp, seq_tmp, payload_length = struct.unpack("!BBH", raw_bytes[0:4])
+                expected_section_length = 4 + payload_length + 2
                 if len(raw_bytes) >= expected_section_length:
-                    # Trim to exact expected length, removing padding
                     raw_bytes = raw_bytes[:expected_section_length]
             except Exception:
-                # If header parsing fails, let _parse_payload_section handle it
                 pass
 
-        # Attempt to parse and validate
         try:
-            return _parse_payload_section(raw_bytes)
-        except FrameError as error:
+            frame_type, seq, enc_payload = _parse_payload_section(raw_bytes)
+
+            # --- NUEVO: descifrado AEAD ---
+            if len(enc_payload) < _NONCE_LEN + 16:  # 16B = tag
+                raise FrameError("Encrypted payload too short")
+            nonce = enc_payload[:_NONCE_LEN]
+            ct_and_tag = enc_payload[_NONCE_LEN:]
+            aad = struct.pack("!BB", frame_type & 0xFF, seq & 0xFF)
+            payload = _AEAD.decrypt(nonce, ct_and_tag, aad)
+
+            return frame_type, seq, payload
+
+        except Exception as error:
             last_exception = error
             continue
 
-    # If we get here, no valid frame was decoded
     if last_exception:
         raise last_exception
     raise FramingError("No valid frame decoded from stream")
+
