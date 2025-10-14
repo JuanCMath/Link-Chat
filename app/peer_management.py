@@ -1,5 +1,5 @@
 """
-peer_discovery.py
+peer_management.py
 ~~~~~~~~~~~~~~~~~
 
 Automatic peer discovery and tracking via periodic beacon broadcasts.
@@ -30,7 +30,6 @@ Example:
     >>> discovery.stop()
 """
 import threading
-import time
 import re
 from datetime import datetime, timezone
 from typing import Dict, Optional, Callable, List
@@ -38,7 +37,6 @@ from typing import Dict, Optional, Callable, List
 from .service_threads import mac_bytes_to_str
 from .peer_models import Peer
 from .peer_store import PeerStore
-from core.config import LinkChatConfig
 # Prefix for beacon broadcast messages
 BEACON_PREFIX = "BEACON|"
 
@@ -445,7 +443,7 @@ class PeerDiscovery:
 
             # Sleep for 5 seconds until next broadcast (or stop signal)
             if broadcast_count < max_broadcasts:
-                self._stop_event.wait(LinkChatConfig.beacon_interval)
+                self._stop_event.wait(self.broadcast_interval)
 
     def send_beacon(self) -> None:
         """

@@ -79,6 +79,7 @@ class ConsoleFrontend:
             >>> frontend = ConsoleFrontend(app)
         """
         self.app = app
+        self.running = True
 
     def run(self) -> None:
         """
@@ -136,7 +137,7 @@ class ConsoleFrontend:
         Note:
             Empty lines are ignored (no-op).
         """
-        while True:
+        while self.running:
             try:
                 line = input("> ").strip()
             except EOFError:
@@ -182,6 +183,7 @@ class ConsoleFrontend:
             /sendfile <MAC|Name> <path>   - Transfer file to peer
             /senddir <MAC|Name> <path>    - Transfer directory to peer
             /sendtoall <text>             - Send message to everyone in the network
+            /quit                         - Shut down the program
 
         Example:
             >>> frontend._handle_command("/peers")
@@ -298,6 +300,19 @@ class ConsoleFrontend:
             self.app.broadcast_chat(parts[1])
             return True
 
+        # Command: /quit - Shut down program
+        if line.startswith("/quit"):
+            parts = line.split(" ", 1)
+            if len(parts) > 1:
+                print(
+                    "[quit] Usage: /quit",
+                    flush=True,
+                )
+                return True
+            
+            self.running = False
+            self.app.stop()
+            return True
 
 
         # Not a recognized command
@@ -331,6 +346,7 @@ class ConsoleFrontend:
   /sendtoall <text>                       -> Send chat message to everyone in the network
   <free text>                             -> Send chat message to active peer
   /help                                   -> Show this help message
+  /quit                                   -> Shut down the program
 """,
             flush=True,
         )

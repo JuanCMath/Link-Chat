@@ -210,6 +210,27 @@ class LinkChatApp:
 
         self._running = True
 
+    # Exiting -------------------------------------------------------
+    def _quit(self) -> None:
+        """Send notifying exit beacon
+
+        Returns:
+            _type_: _description_
+        """
+        if not self._mgr:
+            return
+
+        msg_id = uuid.uuid4().hex[:8]
+        text = f"{self.config.name}: Exiting..."
+        payload = f"QUIT::{msg_id}::{text}".encode()
+
+        try:
+            self._mgr.send_broadcast_payload(payload)
+            self._emit(f"[tx → all] {"Exiting..."}")
+        except Exception as exc:
+            return
+        
+
     def stop(self) -> None:
         """
         Shut down all background services in reverse startup order.
@@ -229,6 +250,10 @@ class LinkChatApp:
         """
         if not self._running:
             return
+
+        self._quit()
+        from time import sleep
+        sleep(0.5) # Waiting for the messages to be sent
 
         if self.msg_ack_mgr:
             self.msg_ack_mgr.stop()
@@ -416,6 +441,7 @@ class LinkChatApp:
             self.discovery.stop()
             self._emit("[discover] Beacon stopped.")
 
+    
     # Sending -------------------------------------------------------
 
     def send_chat(self, line: str) -> Optional[str]:
@@ -647,6 +673,15 @@ class LinkChatApp:
                 display = parts[2]
 
         elif text.startswith("BCAST::"):
+            parts = text.split("::", 2)
+            if len(parts) == 3:
+                msg_id = parts[1]
+                display = parts[2]
+                bcast = True
+        
+        elif text.startswith("QUIT::"):
+            self.registry.remove_peer(mac_bytes_to_str(src))
+
             parts = text.split("::", 2)
             if len(parts) == 3:
                 msg_id = parts[1]
