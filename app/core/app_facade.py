@@ -37,7 +37,7 @@ from typing import Callable, Dict, List, Optional
 
 from ..ack_protocol import ACK_KIND_DATA, ACK_KIND_MSG, AckRetryManager
 from ..file_transfer import FTv2
-from ..peer_discovery import PeerDiscovery, PeerRegistry
+from ..peer_management import PeerDiscovery, PeerRegistry
 from ..peer_models import Peer
 from ..peer_store import JSONPeerStore
 from ..raw_socket import SocketManager

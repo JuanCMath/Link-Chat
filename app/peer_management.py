@@ -200,6 +200,25 @@ class PeerRegistry:
             self._peers.clear()
         self._store.reset()
 
+    def remove_peer(self, mac: str) -> bool:
+        """Remove peer from storage
+
+        Args:
+            mac (str): Peer's MAC address
+
+        Returns:
+            bool: The peer was removed (True) or didn't exist (False)
+        """
+        with self._lock:
+            if mac.lower() in self._peers:
+                self._peers.pop(mac.lower())
+                self._store.save(self._peers)
+                return True
+        
+        return False
+
+
+
     # Resolution ------------------------------------------------------------
 
     def resolve(self, token: str) -> Optional[str]:

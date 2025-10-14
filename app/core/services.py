@@ -26,7 +26,7 @@ import tarfile
 import tempfile
 from typing import Dict, Optional
 
-from ..peer_discovery import PeerRegistry
+from ..peer_management import PeerRegistry
 
 # Regex pattern for validating MAC address format
 MAC_ADDRESS_PATTERN = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")

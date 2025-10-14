@@ -4,7 +4,7 @@ WORKDIR /app
 COPY app/ ./app/
 COPY main.py ./
 
-# No librerías externas: usamos solo stdlib
-# Para ver MAC y usar AF_PACKET se requieren capacidades de red (compose lo añadirá)
+# For security functions
+RUN pip install --no-cache-dir cryptography
 
 ENTRYPOINT [ "python", "main.py" ]

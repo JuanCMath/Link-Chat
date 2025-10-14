@@ -180,7 +180,7 @@ class JSONPeerStore:
         for mac_address in data:
             data[mac_address]["mac"] = mac_address
 
-        # Write with pretty formatting for human readability
+        # Write with formatting for readability
         with open(self.path, "w", encoding="utf-8") as file:
             json.dump(data, file, indent=2, ensure_ascii=False)
 
