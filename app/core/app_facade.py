@@ -1,4 +1,35 @@
-"""Facade that wraps LinkChat backend services for reuse across frontends."""
+"""
+app_facade.py
+~~~~~~~~~~~~~
+
+Application facade coordinating LinkChat backend services.
+
+This module provides the LinkChatApp class, which acts as the primary
+interface for frontend implementations (console, GUI, web). It orchestrates
+all networking components, including raw sockets, peer discovery, file
+transfers, and acknowledgment protocols.
+
+Architecture:
+    The facade pattern decouples presentation logic from networking logic,
+    allowing multiple frontends to reuse the same backend infrastructure
+    without duplicating network code.
+
+Components Managed:
+    - SocketManager: Raw Ethernet socket handling
+    - ThreadManager: Frame RX/TX/Dispatch coordination
+    - PeerRegistry: Peer database with JSON persistence
+    - PeerDiscovery: Automatic beacon-based discovery
+    - FTv2: File and directory transfer protocol
+    - AckRetryManager: Message acknowledgment and retries
+
+Example:
+    >>> from app.core.config import load_config
+    >>> config = load_config()
+    >>> app = LinkChatApp(config)
+    >>> app.start()
+    >>> app.send_chat("Hello world!")
+    >>> app.stop()
+"""
 
 import os
 import uuid
@@ -21,11 +52,49 @@ from .services import (
 
 
 def _default_output(message: str) -> None:
+    """
+    Default output callback that prints to stdout with flush.
+
+    Args:
+        message: Text to display to the user.
+    """
     print(message, flush=True)
 
 
 class LinkChatApp:
-    """High-level application façade coordinating networking components."""
+    """
+    High-level application facade coordinating LinkChat backend services.
+
+    This class provides a simplified interface for frontends to interact with
+    the LinkChat networking stack. It manages lifecycle, peer operations,
+    messaging, and file transfers through a unified API.
+
+    Responsibilities:
+        - Initialize and manage all networking components
+        - Coordinate message sending with ACK retries
+        - Handle file and directory transfers
+        - Track peer discovery state
+        - Route incoming frames to appropriate handlers
+
+    Attributes:
+        config: Application configuration from environment variables.
+        registry: PeerRegistry for discovered peers.
+        discovery: PeerDiscovery instance (optional, can be stopped).
+        ft: FTv2 file transfer manager (optional).
+        msg_ack_mgr: AckRetryManager for chat message acknowledgments.
+
+    Example:
+        >>> config = LinkChatConfig(
+        ...     iface="eth0",
+        ...     name="Alice",
+        ...     inbox_dir="/data/inbox"
+        ... )
+        >>> app = LinkChatApp(config)
+        >>> app.start()
+        >>> app.set_active_peer("aa:bb:cc:dd:ee:ff")
+        >>> app.send_chat("Hello!")
+        >>> app.stop()
+    """
 
     def __init__(
         self,
@@ -33,6 +102,17 @@ class LinkChatApp:
         *,
         output: Callable[[str], None] | None = None,
     ) -> None:
+        """
+        Initialize application facade with configuration.
+
+        Args:
+            config: LinkChatConfig instance with all settings.
+            output: Optional callback for status messages. Defaults to print().
+
+        Example:
+            >>> config = load_config()
+            >>> app = LinkChatApp(config, output=lambda msg: logger.info(msg))
+        """
         self.config = config
         self._output = output or _default_output
 
@@ -51,7 +131,24 @@ class LinkChatApp:
     # Lifecycle -----------------------------------------------------
 
     def start(self) -> None:
-        """Initialize sockets, discovery, transfers and ACK handling."""
+        """
+        Initialize and start all backend services.
+
+        This method performs the following startup sequence:
+        1. Open raw Ethernet socket on configured interface
+        2. Start ThreadManager for frame processing
+        3. Load or reset peer database based on configuration
+        4. Start PeerDiscovery beacon broadcasts
+        5. Initialize FTv2 file transfer manager
+        6. Start AckRetryManager for message acknowledgments
+
+        Thread-safe: Can be called multiple times (no-op if already running).
+
+        Example:
+            >>> app.start()
+            [init] peers loaded: 3
+            [up] iface=eth0 mac=aa:bb:cc:dd:ee:ff ethertype=0x88b5 name=Alice
+        """
         if self._running:
             return
 
@@ -114,7 +211,22 @@ class LinkChatApp:
         self._running = True
 
     def stop(self) -> None:
-        """Shut down background components in reverse startup order."""
+        """
+        Shut down all background services in reverse startup order.
+
+        Cleanup sequence:
+        1. Stop message ACK manager
+        2. Shutdown file transfer manager
+        3. Stop peer discovery beacons
+        4. Stop frame processing threads
+        5. Close raw socket
+
+        Thread-safe: Can be called multiple times (no-op if not running).
+
+        Example:
+            >>> app.stop()
+            # All threads terminated, socket closed
+        """
         if not self._running:
             return
 
@@ -143,35 +255,118 @@ class LinkChatApp:
     # Helpers -------------------------------------------------------
 
     def _emit(self, message: str) -> None:
+        """
+        Send status message to output callback.
+
+        Args:
+            message: Text to display to user.
+        """
         self._output(message)
 
     def _on_beacon(self, peer: Peer) -> None:
+        """
+        Handle received beacon from peer discovery.
+
+        Args:
+            peer: Peer instance with MAC, name, and timestamp.
+        """
         self._emit(f"[beacon rx] {peer.mac} -> {peer.name}")
 
     def _emit_progress(self, role: str, sid: str, done: int, total: int) -> None:
+        """
+        Display file transfer progress.
+
+        Args:
+            role: Transfer role ("tx" or "rx").
+            sid: Session ID for the transfer.
+            done: Bytes transferred so far.
+            total: Total bytes to transfer.
+        """
         percent = (done / total * 100.0) if total else 0.0
         self._emit(f"[{role} {sid}] {done}/{total} bytes ({percent:.1f}%)")
 
     # Accessors -----------------------------------------------------
 
     def get_mac_address(self) -> Optional[str]:
+        """
+        Get local MAC address as string.
+
+        Returns:
+            Optional[str]: MAC address (e.g., "aa:bb:cc:dd:ee:ff") or None if not started.
+        """
         if self._sock:
             return self._sock.get_mac_address()
         return None
 
     def list_peers(self) -> List[Peer]:
+        """
+        List all discovered peers.
+
+        Returns:
+            List[Peer]: List of Peer instances from registry.
+
+        Example:
+            >>> peers = app.list_peers()
+            >>> for p in peers:
+            ...     print(f"{p.name} ({p.mac})")
+        """
         return self.registry.list()
 
     def reset_peers(self) -> None:
+        """
+        Clear peer database and persistence file.
+
+        Example:
+            >>> app.reset_peers()
+            # Peer table cleared
+        """
         self.registry.reset()
 
     def load_peers(self) -> int:
+        """
+        Load peers from JSON persistence file.
+
+        Returns:
+            int: Number of peers loaded.
+
+        Example:
+            >>> count = app.load_peers()
+            >>> print(f"Loaded {count} peers")
+        """
         return self.registry.load()
 
     def resolve_mac(self, token: str) -> Optional[str]:
+        """
+        Resolve peer name or partial MAC to full MAC address.
+
+        Args:
+            token: Peer name or MAC address (partial or full).
+
+        Returns:
+            Optional[str]: Full MAC address if found, None otherwise.
+
+        Example:
+            >>> app.resolve_mac("Alice")
+            'aa:bb:cc:dd:ee:ff'
+            >>> app.resolve_mac("aa:bb")
+            'aa:bb:cc:dd:ee:ff'
+        """
         return resolve_mac(token, self.registry)
 
     def set_active_peer(self, mac_str: str) -> bool:
+        """
+        Set active peer for chat messages.
+
+        Args:
+            mac_str: MAC address in colon-separated format.
+
+        Returns:
+            bool: True if MAC is valid, False otherwise.
+
+        Example:
+            >>> app.set_active_peer("aa:bb:cc:dd:ee:ff")
+            True
+        """
         try:
             self._active_peer = mac_str_to_bytes(mac_str)
             return True
@@ -180,16 +375,38 @@ class LinkChatApp:
             return False
 
     def active_peer_mac(self) -> Optional[str]:
+        """
+        Get currently active peer MAC address.
+
+        Returns:
+            Optional[str]: Active peer MAC or None if not set.
+        """
         if self._active_peer is None:
             return None
         return mac_bytes_to_str(self._active_peer)
 
     def has_active_peer(self) -> bool:
+        """
+        Check if an active peer is currently set.
+
+        Returns:
+            bool: True if active peer is set, False otherwise.
+        """
         return self._active_peer is not None
 
     # Discovery -----------------------------------------------------
 
     def set_discovery(self, enabled: bool) -> None:
+        """
+        Enable or disable peer discovery beacons.
+
+        Args:
+            enabled: True to start beacons, False to stop.
+
+        Example:
+            >>> app.set_discovery(False)
+            [discover] Beacon stopped.
+        """
         if not self.discovery:
             return
         if enabled:
@@ -202,6 +419,22 @@ class LinkChatApp:
     # Sending -------------------------------------------------------
 
     def send_chat(self, line: str) -> Optional[str]:
+        """
+        Send chat message to active peer with ACK retry.
+
+        Args:
+            line: Text message to send (without prefix).
+
+        Returns:
+            Optional[str]: Message ID if sent successfully, None on error.
+
+        Example:
+            >>> msg_id = app.send_chat("Hello world!")
+            [tx → aa:bb:cc:dd:ee:ff] Hello world!
+
+        Note:
+            Requires active peer to be set via set_active_peer().
+        """
         if not self._mgr:
             self._emit("[err] transport not ready")
             return None
@@ -250,6 +483,20 @@ class LinkChatApp:
         return msg_id
 
     def send_file(self, mac_str: str, path: str) -> bool:
+        """
+        Send file to peer with automatic retries.
+
+        Args:
+            mac_str: Destination MAC address.
+            path: Local file path to send.
+
+        Returns:
+            bool: True if transfer initiated, False on error.
+
+        Example:
+            >>> app.send_file("aa:bb:cc:dd:ee:ff", "/home/user/document.pdf")
+            [tx sid=abc123] /home/user/document.pdf
+        """
         if not self.ft:
             self._emit("[err] file-transfer not ready")
             return False
@@ -262,6 +509,27 @@ class LinkChatApp:
         return True
 
     def send_directory(self, mac_str: str, dir_path: str) -> bool:
+        """
+        Send directory to peer as tar.gz archive.
+
+        The directory is packaged into a temporary .tar.gz file, sent to
+        the peer, and automatically extracted on the receiver side. The
+        receiver replaces any existing folder with the same name.
+
+        Args:
+            mac_str: Destination MAC address.
+            dir_path: Local directory path to send.
+
+        Returns:
+            bool: True if transfer initiated, False on error.
+
+        Example:
+            >>> app.send_directory("aa:bb:cc:dd:ee:ff", "/home/user/project/")
+            [senddir] sending project/ as project.tar.gz
+
+        Note:
+            Temporary archive is automatically cleaned up after transfer completes.
+        """
         if not self.ft:
             self._emit("[err] file-transfer not ready")
             return False
@@ -305,6 +573,22 @@ class LinkChatApp:
     # Internal callbacks -------------------------------------------
 
     def _on_frame(self, dst: bytes, src: bytes, payload: bytes) -> None:
+        """
+        Handle incoming Ethernet frame.
+
+        Routes frame to appropriate handler:
+        - File transfer protocol (FTv2) if TYPE_CTRL, TYPE_DATA, or TYPE_ACK
+        - Peer discovery if beacon message
+        - Chat message otherwise
+
+        Args:
+            dst: Destination MAC address (bytes).
+            src: Source MAC address (bytes).
+            payload: Frame payload (excluding Ethernet header).
+
+        Note:
+            This callback is invoked by ThreadManager's dispatch thread.
+        """
         if self.ft and self.ft.handle_payload(src, payload):
             return
 
@@ -334,6 +618,17 @@ class LinkChatApp:
             self.ft.send_ack(src, {"kind": ACK_KIND_MSG, "id": msg_id})
 
     def _handle_ack(self, kind: str, src_mac: bytes, data: Dict) -> None:
+        """
+        Handle received acknowledgment frame.
+
+        Args:
+            kind: ACK type (ACK_KIND_MSG or ACK_KIND_DATA).
+            src_mac: Source MAC address sending the ACK.
+            data: ACK payload dictionary.
+
+        Note:
+            Called by FTv2 when ACK frame is received.
+        """
         mac = mac_bytes_to_str(src_mac)
 
         if kind == ACK_KIND_MSG:
@@ -351,6 +646,17 @@ class LinkChatApp:
                 self._emit(f"[ack {mac}] data sid={sid} seq={seq}")
 
     def _ft_on_complete(self, role: str, sid: str, ok: bool) -> None:
+        """
+        Handle file transfer completion.
+
+        Args:
+            role: Transfer role ("tx" or "rx").
+            sid: Session ID.
+            ok: True if transfer completed successfully, False on failure.
+
+        Note:
+            Automatically cleans up temporary archives for directory transfers.
+        """
         status = "OK" if ok else "FAIL"
         self._emit(f"[{role} {sid}] {status}")
 
@@ -364,4 +670,14 @@ class LinkChatApp:
     # Utilities -----------------------------------------------------
 
     def is_running(self) -> bool:
+        """
+        Check if application is currently running.
+
+        Returns:
+            bool: True if started, False otherwise.
+
+        Example:
+            >>> if app.is_running():
+            ...     app.send_chat("Hello!")
+        """
         return self._running

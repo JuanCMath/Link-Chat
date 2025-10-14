@@ -13,8 +13,6 @@ Supported ACK types:
 - ACK_KIND_MSG: Chat message acknowledgment.
 - ACK_KIND_DATA: File transfer chunk acknowledgment.
 """
-from __future__ import annotations
-
 import json
 import threading
 import time

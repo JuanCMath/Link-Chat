@@ -33,8 +33,6 @@ Directory Transfers:
     with kind="dir" and meta={"dir_name": "folder"}. Receiver extracts
     archive into inbox/<folder_name>/, replacing existing folder if present.
 """
-from __future__ import annotations
-
 import json
 import os
 import shutil
@@ -757,7 +755,7 @@ def debug_inspect_frame(payload: bytes) -> None:
     Args:
         payload: Raw frame bytes including 0x7E flags.
     """
-    from .frame_helper import bytes_to_bits, bit_unstuff, bits_to_bytes, crc16_ccitt
+    from .frame_helper import bytes_to_bits, bit_unstuff, bits_to_bytes, crc16_ccitt_checksum
     import struct
 
     if not (payload and payload[0] == 0x7E and payload[-1] == 0x7E):
@@ -788,7 +786,7 @@ def debug_inspect_frame(payload: bytes) -> None:
         return
 
     crc_recv = int.from_bytes(raw[4 + length : 4 + length + 2], "big")
-    crc_calc = crc16_ccitt(raw[0 : 4 + length])
+    crc_calc = crc16_ccitt_checksum(raw[0 : 4 + length])
     print(
         f"[ft/dbg] TYPE=0x{typ:02x} SEQ={seq} LEN={length} CRC recv=0x{crc_recv:04x} calc=0x{crc_calc:04x}",
         flush=True,
