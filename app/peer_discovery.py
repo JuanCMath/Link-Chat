@@ -4,9 +4,9 @@ import threading, time, re
 from datetime import datetime, timezone
 from typing import Dict, Optional, Callable, Iterable, List
 
-from service_threads import mac_bytes_to_str
-from peer_models import Peer
-from peer_store import PeerStore
+from .service_threads import mac_bytes_to_str
+from .peer_models import Peer
+from .peer_store import PeerStore
 
 BEACON_PREFIX = "BEACON|"
 MAC_RE = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")

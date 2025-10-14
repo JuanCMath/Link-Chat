@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os, json
 from typing import Dict, Iterable, Protocol
-from peer_models import Peer
+from .peer_models import Peer
 
 class PeerStore(Protocol):
     def load(self) -> Dict[str, Peer]: ...

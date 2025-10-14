@@ -1,0 +1,367 @@
+"""Facade that wraps LinkChat backend services for reuse across frontends."""
+
+import os
+import uuid
+from typing import Callable, Dict, List, Optional
+
+from ..ack_protocol import ACK_KIND_DATA, ACK_KIND_MSG, AckRetryManager
+from ..file_transfer import FTv2
+from ..peer_discovery import PeerDiscovery, PeerRegistry
+from ..peer_models import Peer
+from ..peer_store import JSONPeerStore
+from ..raw_socket import SocketManager
+from ..service_threads import ThreadManager, mac_bytes_to_str, mac_str_to_bytes
+from .config import LinkChatConfig
+from .services import (
+    create_directory_archive,
+    pop_pending_archive,
+    resolve_mac,
+    track_pending_archive,
+)
+
+
+def _default_output(message: str) -> None:
+    print(message, flush=True)
+
+
+class LinkChatApp:
+    """High-level application façade coordinating networking components."""
+
+    def __init__(
+        self,
+        config: LinkChatConfig,
+        *,
+        output: Callable[[str], None] | None = None,
+    ) -> None:
+        self.config = config
+        self._output = output or _default_output
+
+        self._store = JSONPeerStore(config.peers_file)
+        self.registry = PeerRegistry(self._store)
+
+        self._sock: Optional[SocketManager] = None
+        self._mgr: Optional[ThreadManager] = None
+        self.discovery: Optional[PeerDiscovery] = None
+        self.ft: Optional[FTv2] = None
+        self.msg_ack_mgr: Optional[AckRetryManager] = None
+        self._running = False
+
+        self._active_peer: Optional[bytes] = None
+
+    # Lifecycle -----------------------------------------------------
+
+    def start(self) -> None:
+        """Initialize sockets, discovery, transfers and ACK handling."""
+        if self._running:
+            return
+
+        self._sock = SocketManager(self.config.iface, self.config.ethertype)
+        self._mgr = ThreadManager(
+            self._sock,
+            on_frame=self._on_frame,
+            drop_own_frames=True,
+        )
+        self._mgr.start()
+
+        if self.config.reset_peers_on_start:
+            self.registry.reset()
+            self._emit(f"[init] peers reset ({self.config.peers_file})")
+        else:
+            count = self.registry.load()
+            self._emit(f"[init] peers loaded: {count}")
+
+        self.discovery = PeerDiscovery(
+            mgr=self._mgr,
+            name=self.config.name,
+            registry=self.registry,
+            interval=self.config.beacon_interval,
+            on_beacon=self._on_beacon,
+        )
+        self.discovery.start()
+
+        self.ft = FTv2(
+            mgr=self._mgr,
+            my_name=self.config.name,
+            inbox_dir=self.config.inbox_dir,
+            chunk_size=self.config.chunk_size,
+            on_info=self._emit,
+            on_progress=self._emit_progress,
+            on_complete=self._ft_on_complete,
+            on_ack=self._handle_ack,
+            data_retry_interval=self.config.file_retry_interval,
+            data_max_retries=self.config.file_max_retries,
+        )
+
+        self.msg_ack_mgr = AckRetryManager(
+            "msg",
+            self.config.msg_retry_interval,
+            self.config.msg_max_retries,
+        )
+        self.msg_ack_mgr.start()
+
+        mac_address = self._sock.get_mac_address()
+        self._emit(
+            f"[up] iface={self.config.iface} mac={mac_address} "
+            f"ethertype={hex(self.config.ethertype)} name={self.config.name}"
+        )
+        self._emit(
+            "Tip: /sendfile <MAC|Name> </local/path> (saved in /data/inbox on receiver)"
+        )
+        self._emit(
+            "Tip: /senddir <MAC|Name> </local/dir> (replaces folder on receiver)"
+        )
+
+        self._running = True
+
+    def stop(self) -> None:
+        """Shut down background components in reverse startup order."""
+        if not self._running:
+            return
+
+        if self.msg_ack_mgr:
+            self.msg_ack_mgr.stop()
+            self.msg_ack_mgr = None
+
+        if self.ft:
+            self.ft.shutdown()
+            self.ft = None
+
+        if self.discovery:
+            self.discovery.stop()
+            self.discovery = None
+
+        if self._mgr:
+            self._mgr.stop()
+            self._mgr = None
+
+        if self._sock:
+            self._sock.close()
+            self._sock = None
+
+        self._running = False
+
+    # Helpers -------------------------------------------------------
+
+    def _emit(self, message: str) -> None:
+        self._output(message)
+
+    def _on_beacon(self, peer: Peer) -> None:
+        self._emit(f"[beacon rx] {peer.mac} -> {peer.name}")
+
+    def _emit_progress(self, role: str, sid: str, done: int, total: int) -> None:
+        percent = (done / total * 100.0) if total else 0.0
+        self._emit(f"[{role} {sid}] {done}/{total} bytes ({percent:.1f}%)")
+
+    # Accessors -----------------------------------------------------
+
+    def get_mac_address(self) -> Optional[str]:
+        if self._sock:
+            return self._sock.get_mac_address()
+        return None
+
+    def list_peers(self) -> List[Peer]:
+        return self.registry.list()
+
+    def reset_peers(self) -> None:
+        self.registry.reset()
+
+    def load_peers(self) -> int:
+        return self.registry.load()
+
+    def resolve_mac(self, token: str) -> Optional[str]:
+        return resolve_mac(token, self.registry)
+
+    def set_active_peer(self, mac_str: str) -> bool:
+        try:
+            self._active_peer = mac_str_to_bytes(mac_str)
+            return True
+        except Exception:
+            self._emit("[peer] Invalid MAC provided.")
+            return False
+
+    def active_peer_mac(self) -> Optional[str]:
+        if self._active_peer is None:
+            return None
+        return mac_bytes_to_str(self._active_peer)
+
+    def has_active_peer(self) -> bool:
+        return self._active_peer is not None
+
+    # Discovery -----------------------------------------------------
+
+    def set_discovery(self, enabled: bool) -> None:
+        if not self.discovery:
+            return
+        if enabled:
+            self.discovery.start()
+            self._emit("[discover] Beacon started.")
+        else:
+            self.discovery.stop()
+            self._emit("[discover] Beacon stopped.")
+
+    # Sending -------------------------------------------------------
+
+    def send_chat(self, line: str) -> Optional[str]:
+        if not self._mgr:
+            self._emit("[err] transport not ready")
+            return None
+        if not self._active_peer:
+            self._emit("[warn] No active peer. Use: /peer <MAC|Name>")
+            return None
+
+        msg_id = uuid.uuid4().hex[:8]
+        text = f"{self.config.name}: {line}"
+        payload = f"MSG::{msg_id}::{text}".encode()
+        dst_bytes = self._active_peer
+        meta = {"text": text, "peer": mac_bytes_to_str(dst_bytes)}
+
+        if self.msg_ack_mgr:
+            mgr = self._mgr
+
+            def send_once(dst=dst_bytes, data=payload, mgr=mgr) -> None:
+                if mgr is None:
+                    return
+                mgr.send_unicast_payload(dst, data)
+
+            def fail_once(info: Dict) -> None:
+                label = info.get("text", text)
+                self._emit(
+                    f"[fail] no ACK after {self.config.msg_max_retries} attempts ({label})"
+                )
+
+            def error_once(exc: Exception) -> None:
+                self._emit(f"[retry] error resending {msg_id}: {exc}")
+
+            self.msg_ack_mgr.add(
+                msg_id,
+                send_once,
+                fail_fn=fail_once,
+                meta=meta,
+                error_fn=error_once,
+            )
+        else:
+            try:
+                self._mgr.send_unicast_payload(dst_bytes, payload)
+            except Exception as exc:
+                self._emit(f"[err] send failed ({exc})")
+                return None
+
+        self._emit(f"[tx → {mac_bytes_to_str(dst_bytes)}] {line}")
+        return msg_id
+
+    def send_file(self, mac_str: str, path: str) -> bool:
+        if not self.ft:
+            self._emit("[err] file-transfer not ready")
+            return False
+        try:
+            dst_mac = mac_str_to_bytes(mac_str)
+        except Exception:
+            self._emit("[sendfile] Invalid MAC.")
+            return False
+        self.ft.send_file(dst_mac, path)
+        return True
+
+    def send_directory(self, mac_str: str, dir_path: str) -> bool:
+        if not self.ft:
+            self._emit("[err] file-transfer not ready")
+            return False
+
+        package = create_directory_archive(dir_path)
+        if not package:
+            return False
+
+        archive_path = package["archive_path"]
+        folder_name = package["folder_name"]
+        archive_name = f"{folder_name}.tar.gz"
+
+        try:
+            dst_mac = mac_str_to_bytes(mac_str)
+        except Exception:
+            self._emit("[senddir] Invalid MAC.")
+            try:
+                os.remove(archive_path)
+            except Exception:
+                pass
+            return False
+
+        self._emit(f"[senddir] sending {folder_name}/ as {archive_name}")
+        sid = self.ft.send_file(
+            dst_mac,
+            archive_path,
+            display_name=archive_name,
+            kind="dir",
+            meta={"dir_name": folder_name},
+        )
+        if not sid:
+            try:
+                os.remove(archive_path)
+            except Exception:
+                pass
+            return False
+
+        track_pending_archive(sid, archive_path)
+        return True
+
+    # Internal callbacks -------------------------------------------
+
+    def _on_frame(self, dst: bytes, src: bytes, payload: bytes) -> None:
+        if self.ft and self.ft.handle_payload(src, payload):
+            return
+
+        if len(payload) >= 2 and (payload[0] == 0x7E or payload[-1] == 0x7E):
+            from file_transfer import debug_inspect_frame
+
+            debug_inspect_frame(payload)
+            self._emit(f"[warn] 0x7E frame not handled by FT (len={len(payload)})")
+            return
+
+        text = payload.decode(errors="ignore")
+        display = text
+        msg_id: Optional[str] = None
+
+        if text.startswith("MSG::"):
+            parts = text.split("::", 2)
+            if len(parts) == 3:
+                msg_id = parts[1]
+                display = parts[2]
+
+        if self.discovery:
+            self.discovery.handle_incoming(src, display)
+
+        self._emit(f"[rx {mac_bytes_to_str(src)} → {mac_bytes_to_str(dst)}] {display}")
+
+        if msg_id and self.ft:
+            self.ft.send_ack(src, {"kind": ACK_KIND_MSG, "id": msg_id})
+
+    def _handle_ack(self, kind: str, src_mac: bytes, data: Dict) -> None:
+        mac = mac_bytes_to_str(src_mac)
+
+        if kind == ACK_KIND_MSG:
+            mid = data.get("id")
+            if mid and self.msg_ack_mgr:
+                info = self.msg_ack_mgr.ack(mid)
+                if info:
+                    text = info.get("text", "")
+                    self._emit(f"[ack {mac}] message confirmed ({text})")
+
+        elif kind == ACK_KIND_DATA:
+            sid = data.get("sid")
+            seq = data.get("seq")
+            if sid is not None and seq is not None:
+                self._emit(f"[ack {mac}] data sid={sid} seq={seq}")
+
+    def _ft_on_complete(self, role: str, sid: str, ok: bool) -> None:
+        status = "OK" if ok else "FAIL"
+        self._emit(f"[{role} {sid}] {status}")
+
+        archive_path = pop_pending_archive(sid)
+        if archive_path:
+            try:
+                os.remove(archive_path)
+            except OSError as exc:
+                self._emit(f"[senddir] cleanup failed for {archive_path}: {exc}")
+
+    # Utilities -----------------------------------------------------
+
+    def is_running(self) -> bool:
+        return self._running

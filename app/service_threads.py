@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Callable, Optional, Tuple
 
-from raw_socket import SocketManager
+from .raw_socket import SocketManager
 
 BROADCAST_MAC_BYTES = b"\xff\xff\xff\xff\xff\xff"
 

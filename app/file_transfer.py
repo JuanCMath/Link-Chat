@@ -43,8 +43,8 @@ import threading
 import uuid
 from typing import Any, Callable, Dict, Optional
 
-from frame_helper import CRCError, FramingError, decode_frame, encode_frame
-from ack_protocol import (
+from .frame_helper import CRCError, FramingError, decode_frame, encode_frame
+from .ack_protocol import (
     TYPE_ACK,
     ACK_KIND_DATA,
     AckRetryManager,
@@ -757,7 +757,7 @@ def debug_inspect_frame(payload: bytes) -> None:
     Args:
         payload: Raw frame bytes including 0x7E flags.
     """
-    from frame_helper import bytes_to_bits, bit_unstuff, bits_to_bytes, crc16_ccitt
+    from .frame_helper import bytes_to_bits, bit_unstuff, bits_to_bytes, crc16_ccitt
     import struct
 
     if not (payload and payload[0] == 0x7E and payload[-1] == 0x7E):
