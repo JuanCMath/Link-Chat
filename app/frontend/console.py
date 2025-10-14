@@ -181,6 +181,7 @@ class ConsoleFrontend:
             /discover on|off              - Control beacon broadcasts
             /sendfile <MAC|Name> <path>   - Transfer file to peer
             /senddir <MAC|Name> <path>    - Transfer directory to peer
+            /sendtoall <text>             - Send message to everyone in the network
 
         Example:
             >>> frontend._handle_command("/peers")
@@ -284,6 +285,21 @@ class ConsoleFrontend:
             self.app.send_directory(mac_address, directory_path)
             return True
 
+        # Command: /sendtoall <text> - Send broadcast
+        if line.startswith("/sendtoall"):
+            parts = line.split(" ", 1)
+            if len(parts) != 2:
+                print(
+                    "[sendtoall] Usage: /sendtoall <text>",
+                    flush=True,
+                )
+                return True
+            
+            self.app.broadcast_chat(parts[1])
+            return True
+
+
+
         # Not a recognized command
         return False
 
@@ -312,6 +328,7 @@ class ConsoleFrontend:
   /discover on|off                        -> Start or stop beacon broadcasts
   /sendfile <MAC|Name> </path/to/file>    -> Send file to peer
   /senddir <MAC|Name> </path/to/dir>      -> Send directory (tar.gz, replaces on receive)
+  /sendtoall <text>                       -> Send chat message to everyone in the network
   <free text>                             -> Send chat message to active peer
   /help                                   -> Show this help message
 """,

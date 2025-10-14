@@ -569,6 +569,42 @@ class LinkChatApp:
 
         track_pending_archive(sid, archive_path)
         return True
+    
+    def broadcast_chat(self, line: str) -> bool:
+        """
+        Broadcast chat message to all discovered peers.
+
+        Args:
+            line: Text message to broadcast.
+
+        Returns:
+            bool: True if broadcast initiated, False on error.
+
+        Example:
+            >>> app.broadcast_chat("Hello everyone!")
+            [broadcast] Hello everyone!"""
+        
+        if not self._mgr:
+            self._emit("[err] transport not ready")
+            return False
+
+        msg_id = uuid.uuid4().hex[:8]
+        text = f"{self.config.name}: {line}"
+        payload = f"BCAST::{msg_id}::{text}".encode()
+        peers = self.registry.list()
+
+        if not peers:
+            self._emit("[warn] No peers available. Message may not be received")
+
+        try:
+            self._mgr.send_broadcast_payload(payload)
+            self._emit(f"[tx → all] {line}")
+        except Exception as exc:
+            self._emit(f"[err] send to all failed ({exc})")
+            return False
+
+        return True
+
 
     # Internal callbacks -------------------------------------------
 
@@ -602,6 +638,7 @@ class LinkChatApp:
         text = payload.decode(errors="ignore")
         display = text
         msg_id: Optional[str] = None
+        bcast = False
 
         if text.startswith("MSG::"):
             parts = text.split("::", 2)
@@ -609,12 +646,19 @@ class LinkChatApp:
                 msg_id = parts[1]
                 display = parts[2]
 
+        elif text.startswith("BCAST::"):
+            parts = text.split("::", 2)
+            if len(parts) == 3:
+                msg_id = parts[1]
+                display = parts[2]
+                bcast = True
+
         if self.discovery:
             self.discovery.handle_incoming(src, display)
 
-        self._emit(f"[rx {mac_bytes_to_str(src)} → {mac_bytes_to_str(dst)}] {display}")
+        self._emit(f"[rx {mac_bytes_to_str(src)} → {"all" if bcast else mac_bytes_to_str(dst)}] {display}")
 
-        if msg_id and self.ft:
+        if not bcast and msg_id and self.ft:
             self.ft.send_ack(src, {"kind": ACK_KIND_MSG, "id": msg_id})
 
     def _handle_ack(self, kind: str, src_mac: bytes, data: Dict) -> None:
