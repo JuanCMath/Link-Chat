@@ -126,7 +126,7 @@ class LinkChatApp:
         self._output = output or _default_output
 
         self._store = JSONPeerStore(config.peers_file)
-        self.registry = PeerRegistry(self._store)
+        self.registry = PeerRegistry(self._store, config.max_peer_age_secs)
 
         self._sock: Optional[SocketManager] = None
         self._mgr: Optional[ThreadManager] = None
@@ -218,26 +218,6 @@ class LinkChatApp:
         )
 
         self._running = True
-
-    # Exiting -------------------------------------------------------
-    def _quit(self) -> None:
-        """Send notifying exit beacon
-
-        Returns:
-            _type_: _description_
-        """
-        if not self._mgr:
-            return
-
-        msg_id = uuid.uuid4().hex[:8]
-        text = f"{self.config.name}: Exiting..."
-        payload = f"QUIT::{msg_id}::{text}".encode()
-
-        try:
-            self._mgr.send_broadcast_payload(payload)
-            self._emit(f"[tx → all] {"Exiting..."}")
-        except Exception as exc:
-            return
         
 
     def stop(self) -> None:
@@ -285,6 +265,28 @@ class LinkChatApp:
             self._sock = None
 
         self._running = False
+
+
+        # Exiting -------------------------------------------------------
+    def _quit(self) -> None:
+        """Send notifying exit beacon
+
+        Returns:
+            _type_: _description_
+        """
+        if not self._mgr:
+            return
+
+        msg_id = uuid.uuid4().hex[:8]
+        text = f"{self.config.name}: Exiting..."
+        payload = f"LEAVE::{msg_id}::{text}".encode()
+
+        try:
+            self._mgr.send_broadcast_payload(payload)
+            self._emit(f"[tx → all] {"Exiting..."}")
+        except Exception as exc:
+            return
+
 
     # Helpers -------------------------------------------------------
 
@@ -660,6 +662,9 @@ class LinkChatApp:
         Note:
             This callback is invoked by ThreadManager's dispatch thread.
         """
+
+        self.registry.upsert(mac = mac_bytes_to_str(src)) # updates peer last_seen timestamp (or inserts it)
+
         if self.ft and self.ft.handle_payload(src, payload):
             return
 
@@ -688,7 +693,7 @@ class LinkChatApp:
                 display = parts[2]
                 bcast = True
         
-        elif text.startswith("QUIT::"):
+        elif text.startswith("LEAVE::"):
             self.registry.remove_peer(mac_bytes_to_str(src))
 
             parts = text.split("::", 2)
@@ -698,7 +703,7 @@ class LinkChatApp:
                 bcast = True
 
         if self.discovery:
-            self.discovery.handle_incoming(src, display)
+            self.discovery.handle_incoming(src, display) # tries to get name
 
         self._emit(f"[rx {mac_bytes_to_str(src)} → {"all" if bcast else mac_bytes_to_str(dst)}] {display}")
 
@@ -718,6 +723,7 @@ class LinkChatApp:
             Called by FTv2 when ACK frame is received.
         """
         mac = mac_bytes_to_str(src_mac)
+
 
         if kind == ACK_KIND_MSG:
             mid = data.get("id")

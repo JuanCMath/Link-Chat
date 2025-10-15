@@ -110,6 +110,7 @@ class LinkChatConfig:
     msg_max_retries: int
     file_retry_interval: float
     file_max_retries: int
+    max_peer_age_secs: float
 
 
 def _parse_bool_env(value: str | None, default: bool) -> bool:
@@ -187,15 +188,12 @@ def load_config(env: Mapping[str, str] | None = None) -> LinkChatConfig:
         name=env_mapping.get("NAME", "node"),
         beacon_interval=float(env_mapping.get("BEACON_INTERVAL", "5.0")),
         peers_file=env_mapping.get("PEERS_FILE", "/data/peers.json"),
-        reset_peers_on_start=_parse_bool_env(
-            env_mapping.get("RESET_PEERS_ON_START"), default=True
-        ),
+        reset_peers_on_start=_parse_bool_env(env_mapping.get("RESET_PEERS_ON_START"), default=True),
         inbox_dir=env_mapping.get("INBOX_DIR", "/data/inbox"),
         chunk_size=int(env_mapping.get("CHUNK_SIZE", "1300")),
         msg_retry_interval=msg_retry_interval,
         msg_max_retries=int(env_mapping.get("MSG_MAX_RETRIES", "3")),
-        file_retry_interval=float(
-            env_mapping.get("FILE_RETRY_INTERVAL", file_retry_fallback)
-        ),
+        file_retry_interval=float(env_mapping.get("FILE_RETRY_INTERVAL", file_retry_fallback)),
         file_max_retries=int(env_mapping.get("FILE_MAX_RETRIES", "3")),
+        max_peer_age_secs=float(env_mapping.get("STALE_TIME_UNTIL_PRUNE", "90"))
     )

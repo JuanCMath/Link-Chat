@@ -250,6 +250,10 @@ class PeerDiscovery:
         if ":" in text:
             potential_name = text.split(":", 1)[0].strip()[:64]
 
+            if self.registry.get(mac_address):
+                peer = self.registry.get(mac_address)
+                if peer:
+                    old_name = peer.name
             # Only register if name is non-empty
-            if potential_name:
+            if potential_name and len(old_name)==0:
                 self.registry.upsert(mac_address, potential_name)

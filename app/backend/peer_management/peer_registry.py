@@ -31,14 +31,16 @@ Example:
 import threading
 import re
 from datetime import datetime, timezone
+from time import sleep
 from typing import Dict, Optional, List
 
 from .peer_models import Peer
 from .peer_store import PeerStore
+from ..utils.mac_utils import MAC_ADDRESS_PATTERN
 
 
-# Regex pattern for validating MAC address format (case-insensitive)
-MAC_ADDRESS_PATTERN = re.compile(r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
+# Time Interval for checking for possible peers to prune
+PRUNING_INTERVAL = 15.0
 
 
 def get_current_utc_timestamp() -> str:
@@ -83,7 +85,7 @@ class PeerRegistry:
         'aa:bb:cc:dd:ee:ff'
     """
 
-    def __init__(self, store: PeerStore) -> None:
+    def __init__(self, store: PeerStore, max_age: float) -> None:
         """
         Initialize registry with persistent storage backend.
 
@@ -93,10 +95,22 @@ class PeerRegistry:
         self._lock = threading.Lock()
         self._peers: Dict[str, Peer] = {}
         self._store = store
+        self._max_age = max_age
+        self._pruner : Optional[threading.Thread] = threading.Thread(target=self._prune_stale, name="pruner", daemon=True)
+        self._pruner.start()
+        self._stop_pruner = threading.Event()
+        self._stop_pruner.clear()
+
+    def close(self) -> None:
+        self._stop_pruner.set()
+        if self._pruner: 
+            self._pruner.join(timeout=1.0)
+            self._pruner = None
+        self._peers.clear()
 
     # CRUD Operations -------------------------------------------------------
 
-    def upsert(self, mac: str, name: Optional[str] = None) -> Peer:
+    def upsert(self, mac: str, name: Optional[str] = None, save: bool = True) -> Peer:
         """
         Insert or update a peer in the registry.
 
@@ -107,6 +121,7 @@ class PeerRegistry:
             mac: MAC address of the peer (will be normalized to lowercase).
             name: Optional human-readable name. If provided and non-empty,
                   updates the peer's name. Empty string or None leaves name unchanged.
+            save: Make operation persistent
 
         Returns:
             Peer: The created or updated peer object.
@@ -137,7 +152,7 @@ class PeerRegistry:
             self._peers[mac] = peer
 
             # Persist to storage
-            self._store.save(self._peers)
+            if save: self._store.save(self._peers)
 
             return peer
 
@@ -195,11 +210,12 @@ class PeerRegistry:
             self._peers.clear()
         self._store.reset()
 
-    def remove_peer(self, mac: str) -> bool:
+    def remove_peer(self, mac: str, save: bool = True) -> bool:
         """Remove peer from storage
 
         Args:
             mac (str): Peer's MAC address
+            save (bool): Make operation persistent
 
         Returns:
             bool: The peer was removed (True) or didn't exist (False)
@@ -207,7 +223,7 @@ class PeerRegistry:
         with self._lock:
             if mac.lower() in self._peers:
                 self._peers.pop(mac.lower())
-                self._store.save(self._peers)
+                if save: self._store.save(self._peers)
                 return True
         
         return False
@@ -311,3 +327,27 @@ class PeerRegistry:
         with self._lock:
             self._peers = loaded_peers
         return len(self._peers)
+    
+    def _prune_stale(self) -> None:
+
+
+        while not self._stop_pruner.is_set():
+                       
+            with self._lock:
+                # Peers discovered
+                if len(self._peers)>=0:
+                    start_time = datetime.now()
+                    initial_len = len(self._peers)
+
+                    for peer in self._peers.values():
+                        delta = start_time - datetime.fromisoformat(peer.last_seen)
+                        if(delta.total_seconds() >= self._max_age):
+                            self.remove_peer(peer.mac, save = False)
+
+                    if(initial_len > len(self._peers)): 
+                        self._store.save(self._peers)
+                    
+            sleep(PRUNING_INTERVAL)
+
+
+        

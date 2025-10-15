@@ -21,7 +21,6 @@ Note:
 """
 
 import os
-import re
 import tarfile
 import tempfile
 from typing import Dict, Optional
