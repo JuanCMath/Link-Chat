@@ -255,3 +255,22 @@ class PeerDiscovery:
                 # Only register if name is non-empty
                 if potential_name and len(peer.name)==0:
                     self.registry.upsert(mac_address, potential_name)
+
+
+    def set_beacon_interval(self, interval: float) -> bool:
+        """
+        Update the beacon broadcast interval.
+
+        Changes the interval between periodic beacon transmissions. The new
+        interval takes effect immediately for the next scheduled broadcast.
+
+        Args:
+            interval: New interval in seconds (float).
+        """
+        try:
+            self.stop()
+            self.broadcast_interval = interval
+            self.start()
+            return True
+        except Exception:
+            return False

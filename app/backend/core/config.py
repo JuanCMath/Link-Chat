@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 
-@dataclass(frozen=True)
+@dataclass
 class LinkChatConfig:
     """
     Immutable configuration container for LinkChat application.

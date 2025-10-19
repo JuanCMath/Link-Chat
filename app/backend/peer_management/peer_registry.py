@@ -379,4 +379,10 @@ class PeerRegistry:
             with self._lock: self.upsert(mac, activate = True)
 
 
-        
+    def set_max_age(self, max_age: float) -> bool:
+        try:
+            with self._lock:
+                self._max_age = max_age
+            return True
+        except Exception:
+            return False

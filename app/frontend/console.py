@@ -179,7 +179,9 @@ class ConsoleFrontend:
             /sendfile <MAC|Name> <path>     - Transfer file to peer
             /senddir <MAC|Name> <path>      - Transfer directory to peer
             /sendtoall <text>               - Send message to everyone in the network
-            /iface <optional (text, number)>- Swith used interface (show available if alone) 
+            /ifaces                         - Show available interfaces 
+            /config show                    - Display current configuration
+            /config set <param> <value>     - Set configuration parameter
             /quit                           - Shut down the program
 
         Example:
@@ -297,42 +299,44 @@ class ConsoleFrontend:
             self.app.broadcast_chat(parts[1])
             return True
         
-        # Command: /sendtoall <text> - Send broadcast
-        if line.startswith("/iface"):
+        # Command: /ifaces - Show available interfaces
+        if line.startswith("/ifaces"):
             parts = line.split(" ", 1)
-            if len(parts) > 2:
+            if len(parts) > 1:
                 print(
-                    "[iface] Usage: /iface <optional (text, number)",
+                    "[ifaces] Usage: /ifaces",
                     flush=True,
                 )
-                return True
             
             else:
                 from ..backend.utils.network_utils import list_network_interfaces
                 ifaces = list_network_interfaces()
-
-                if len(parts) == 1:
-                    ConsoleFrontend.show_ifaces(ifaces)
-
-                elif len(parts) == 2:
-                    iface = ""
-                    try:
-                        iface = ifaces[int(parts[1])]
-                    except ValueError or IndexError:
-                        iface = parts[1]
-                    
-                    if not self.app.change_interface(iface):
-                       print(
-                        f"[iface] Interface {iface} not found. List available interfce with /iface",
-                        flush=True,
-                        ) 
-                    else:
-                        print(
-                        f"[iface] Switched to interface {iface}",
-                        flush=True,
-                        )
+                ConsoleFrontend.show_ifaces(ifaces)
                     
             return True
+
+
+        # Command family: /config
+        if line.startswith("/config"):
+            parts = line.split(" ", 3)
+
+            # Command: /config show - Display current configuration
+            if len(parts) == 2 and parts[1] == "show":
+                config_params = self.app.show_config()
+                for param in config_params:
+                    print(param, flush=True)
+                return True
+            
+            # Command: /config set <param> <value> - Set configuration parameter
+            elif len(parts) == 4 and parts[1] == "set":
+                param, value = parts[2], parts[3]
+                print(self.app.set_config_param(param, value), flush = True)
+                return True  
+
+            else:
+                print("[config] Usage: 1) /config set <param> <value> | 2) /config show", flush=True)
+                return True         
+
 
         # Command: /quit - Shut down program
         if line.startswith("/quit"):
@@ -347,7 +351,7 @@ class ConsoleFrontend:
             self.running = False
             self.app.stop()
             return True
-
+        
 
         # Not a recognized command
         return False
@@ -370,19 +374,21 @@ class ConsoleFrontend:
         """
         print(
             """Commands:
-  /me                                     -> Show your MAC address and name
-  /peers                                  -> List all discovered peers
-  /peers reset                            -> Clear peer table and persistence file
-  /peer <MAC|Name>                        -> Set active peer for chat messages
-  /discover on|off                        -> Start or stop beacon broadcasts
-  /sendfile <MAC|Name> </path/to/file>    -> Send file to peer
-  /senddir <MAC|Name> </path/to/dir>      -> Send directory (tar.gz, replaces on receive)
-  /sendtoall <text>                       -> Send chat message to everyone in the network
-  /iface <optional (text, number)>        -> Swith used interface (show available if alone) 
-  <free text>                             -> Send chat message to active peer
-  /help                                   -> Show this help message
-  /quit                                   -> Shut down the program
-""",
+                /me                                     -> Show your MAC address and name
+                /peers                                  -> List all discovered peers
+                /peers reset                            -> Clear peer table and persistence file
+                /peer <MAC|Name>                        -> Set active peer for chat messages
+                /discover on|off                        -> Start or stop beacon broadcasts
+                /sendfile <MAC|Name> </path/to/file>    -> Send file to peer
+                /senddir <MAC|Name> </path/to/dir>      -> Send directory (tar.gz, replaces on receive)
+                /sendtoall <text>                       -> Send chat message to everyone in the network
+                /ifaces                                 -> Show available interfaces
+                /config show                            -> Display current configuration
+                /config set <param> <value>             -> Set configuration parameter
+                <free text>                             -> Send chat message to active peer
+                /help                                   -> Show this help message
+                /quit                                   -> Shut down the program
+            """,
             flush=True,
         )
 
@@ -417,6 +423,11 @@ class ConsoleFrontend:
 
     @staticmethod
     def show_ifaces(ifaces: List[str]) -> None:
+        """Prints available interfaces
+
+        Args:
+            ifaces (List[str]): list of formated strings "<param>: <values>"
+        """
         print("Available interfaces:", flush=True)
         for index, iface in enumerate(ifaces):
             print(f"[{index}] {iface}", flush=True)

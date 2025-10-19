@@ -648,18 +648,117 @@ class LinkChatApp:
         return True
 
 
-
+    # Config updates ----------------------------------------------------
     def change_interface(self, iface: str) -> bool:
+        """Changes interface beeing used in hte app
+
+        Args:
+            iface (str): New iface to use
+
+        Returns:
+            bool: Interface was correctly changed
+        """
+        if(self._current_iface == iface):
+            return True
+
         if(self._sock and self._sock.change_interface(iface)):
-            if(self._current_iface != iface):
-                self.iface_registries[iface] = self.registry
-                self.registry = self.iface_registries.get(iface, PeerRegistry(self._store, self.config.max_peer_age_secs))
-                self._current_iface = iface
+            self.iface_registries[self._current_iface] = self.registry
+            self.registry = self.iface_registries.get(iface, PeerRegistry(self._store, self.config.max_peer_age_secs))
+            self._current_iface = iface
             return True
         
         return False
         
 
+    def show_config(self) -> List[str]:
+        """Gives a list with config params and values ready to print
+
+        Returns:
+            List[str]: ["<param>: <value>", ...]
+        """
+        list = []
+        for key, value in vars(self.config).items():
+            list.append(f"{key}: {value}")
+        return list
+
+    def set_config_param(self, param, value):
+        """
+        Dynamically update a configuration parameter at runtime.
+        Args:
+            param: Name of the parameter to update (str)
+            value: New value to set
+        Returns:
+            str: Success or error message for frontend display
+        """
+        # List of supported parameters and their types
+        SUPPORTED = {
+            "name": str,
+            "iface": str,
+            "beacon_interval": float,
+            "max_peer_age_secs": float,
+            "msg_retry_interval": float,
+            "msg_max_retries": int,
+            "file_retry_interval": float,
+            "file_max_retries": int,
+        }
+        if param not in SUPPORTED:
+            return f"[config] Unsupported parameter: {param}"
+
+        # Type validation
+        expected_type = SUPPORTED[param]
+        try:
+            if expected_type is int:
+                value = int(value)
+                if value <= 0:
+                    return f"[config] Value for {param} must be positive."
+            elif expected_type is float:
+                value = float(value)
+                if value <= 0:
+                    return f"[config] Value for {param} must be positive."
+            else:
+                value = str(value)
+        except Exception:
+            return f"[config] Invalid value type for {param}."
+
+        # Update config
+        old_value = getattr(self.config, param, None)
+        setattr(self.config, param, value)
+
+        # Special handling for some parameters
+        if param == "iface":
+            if not self.change_interface(str(value)):
+                setattr(self.config, param, old_value)
+                return f"[config] Failed to change interface to {value}."
+            self._emit(f"[config] Interface changed to {value}.")
+
+        elif param == "name":
+            self._emit(f"[config] Name changed to {value}.")
+
+        elif param == "beacon_interval" and self.discovery:
+            if (self.discovery.set_beacon_interval(float(value))):
+                self._emit(f"[config] Beacon interval set to {value}s.")
+
+        elif param == "max_peer_age_secs":
+            if(self.registry.set_max_age(float(value))):
+                self._emit(f"[config] Peer max supported age set to {value}s.")
+
+        elif param == "msg_retry_interval" and self.msg_ack_mgr:
+            if (self.msg_ack_mgr.set_retry_interval(float(value))):
+                self._emit(f"[config] Message retry interval set to {value}s.")
+
+        elif param == "msg_max_retries" and self.msg_ack_mgr:
+            if (self.msg_ack_mgr.set_max_retries(int(value))):
+                self._emit(f"[config] Message max retries set to {value}.")
+
+        elif param == "file_retry_interval" and self.ft:
+            if (self.ft.set_data_retry_interval(float(value))):
+                self._emit(f"[config] File retry interval set to {value}s.")
+
+        elif param == "file_max_retries" and self.ft:
+            if (self.ft.set_data_max_retries(int(value))):
+                self._emit(f"[config] File max retries set to {value}.")
+
+        return f"[config] {param} updated to {value}."
 
     # Internal callbacks -------------------------------------------
 

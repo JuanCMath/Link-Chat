@@ -49,6 +49,7 @@ from .ack_protocol import (
     build_ack_frame,
     decode_ack_payload,
 )
+from .service_threads import ThreadManager
 
 # Frame type identifiers
 TYPE_CTRL = 0x10
@@ -80,7 +81,7 @@ class FTv2:
 
     def __init__(
         self,
-        mgr,  # ThreadManager with send_unicast_payload(dst, bytes)
+        mgr: ThreadManager,  # ThreadManager with send_unicast_payload(dst, bytes)
         my_name: str,
         inbox_dir: str = "/data/inbox",
         chunk_size: int = 1300,
@@ -132,7 +133,7 @@ class FTv2:
         os.makedirs(self.inbox, exist_ok=True)
 
         # Transfer state
-        self.rx: Optional[Dict] = None  # {'sid','f','sz','recv','src','path'}
+        self.rx: Optional[Dict] = None  # {'sid','file_obj','size','recv','src','path'}
         self.tx: Dict[str, Dict] = {}  # sid -> session dict
         self._tx_lock = threading.Lock()
 
@@ -168,19 +169,19 @@ class FTv2:
             return None
 
         sid = uuid.uuid4().hex[:12]
-        fn = display_name or os.path.basename(local_path)
-        sz = os.path.getsize(local_path)
+        file_name = display_name or os.path.basename(local_path)
+        size = os.path.getsize(local_path)
 
         session = {
             "dst": dst_mac,
             "path": local_path,
-            "sz": sz,
-            "fn": fn,
+            "size": size,
+            "file_name": file_name,
             "acked": 0,
             "next_seq": 0,
             "next_offset": 0,
             "pending_id": None,
-            "fh": None,
+            "file_handler": None,
             "kind": kind,
             "meta": meta or {},
         }
@@ -194,13 +195,13 @@ class FTv2:
                 "op": "REQ",
                 "sid": sid,
                 "name": self.name,
-                "fn": fn,
-                "sz": sz,
+                "file_name": file_name,
+                "size": size,
                 "kind": kind,
                 "meta": meta or {},
             },
         )
-        self.on_info(f"[ft] REQ sid={sid} -> {fn} ({sz} bytes)")
+        self.on_info(f"[ft] REQ sid={sid} -> {file_name} ({size} bytes)")
         return sid
 
     def handle_payload(self, src_mac: bytes, payload: bytes) -> bool:
@@ -219,19 +220,19 @@ class FTv2:
             return False
 
         try:
-            ftype, seq, pl = decode_frame(payload)
+            ftype, seq, payload = decode_frame(payload)
         except (CRCError, FramingError):
             return False
 
         if ftype == TYPE_CTRL:
-            self._on_ctrl(src_mac, pl)
+            self._on_ctrl(src_mac, payload)
 
             return True
         if ftype == TYPE_DATA:
-            self._on_data(src_mac, seq, pl)
+            self._on_data(src_mac, seq, payload)
             return True
         if ftype == TYPE_ACK:
-            self._on_ack(src_mac, pl)
+            self._on_ack(src_mac, payload)
             return True
         return False
 
@@ -247,7 +248,7 @@ class FTv2:
             self._drop_tx_session(sid)
         if self.rx:
             try:
-                self.rx["f"].close()
+                self.rx["file_obj"].close()
             except Exception:
                 pass
             self.rx = None
@@ -263,6 +264,39 @@ class FTv2:
         """
         frame = build_ack_frame(payload, seq)
         self.mgr.send_unicast_payload(dst_mac, frame)
+
+
+    def set_data_retry_interval(self, value: float) -> bool:
+        """
+        Change the value of data retry interval
+
+        Args:
+            value (float): new interval
+
+        Returns:
+            bool: the interval was changed succesfully
+        """
+        try:
+            return self._data_retry.set_retry_interval(value)
+        except Exception:
+            return False
+        
+    
+    def set_data_max_retries(self, value: int) -> bool:
+        """
+        Change the value of data max retries
+
+        Args:
+            value (int): new max retries value
+
+        Returns:
+            bool: the max retries value was changed succesfully
+        """
+        try:
+            return self._data_retry.set_max_retries(value)
+        except Exception:
+            return False
+
 
     # Internal helpers ------------------------------------------------
 
@@ -296,8 +330,8 @@ class FTv2:
         sid = c.get("sid")
 
         if op == "REQ":
-            fn = c.get("fn", "file.bin")
-            sz = int(c.get("sz", 0))
+            file_name = c.get("file_name", "file.bin")
+            size = int(c.get("size", 0))
             kind = c.get("kind", "file")
             meta = c.get("meta") if isinstance(c.get("meta"), dict) else {}
             if self.rx is not None:
@@ -305,25 +339,25 @@ class FTv2:
                 self.on_info(f"[ft] REQ from {self._mac2s(src_mac)} rejected (BUSY)")
                 return
             try:
-                target = os.path.join(self.inbox, fn)
-                f = open(target, "wb")
+                target = os.path.join(self.inbox, file_name)
+                file_obj = open(target, "wb")
             except OSError as e:
                 self._send_ctrl(src_mac, {"op": "RJCT", "sid": sid})
                 self.on_info(f"[ft] cannot open destination: {e}")
                 return
             self.rx = {
                 "sid": sid,
-                "f": f,
-                "sz": sz,
+                "file_obj": file_obj,
+                "size": size,
                 "recv": 0,
                 "src": self._mac2s(src_mac),
                 "path": target,
-                "fn": fn,
+                "file_name": file_name,
                 "kind": kind,
                 "meta": meta,
             }
             self._send_ctrl(src_mac, {"op": "ACPT", "sid": sid})
-            self.on_info(f"[ft] ACPT sid={sid} {fn} ({sz} bytes)")
+            self.on_info(f"[ft] ACPT sid={sid} {file_name} ({size} bytes)")
             return
 
         if op == "ACPT":
@@ -331,9 +365,9 @@ class FTv2:
                 session = self.tx.get(sid)
             if not session:
                 return
-            if session.get("fh") is None:
+            if session.get("file_handler") is None:
                 try:
-                    fh = open(session["path"], "rb")
+                    file_handler = open(session["path"], "rb")
                 except OSError as exc:
                     self._send_ctrl(session["dst"], {"op": "ABRT", "sid": sid})
                     self.on_info(f"[ft] TX error sid={sid}: {exc}")
@@ -343,11 +377,11 @@ class FTv2:
                 with self._tx_lock:
                     current = self.tx.get(sid)
                     if not current:
-                        fh.close()
+                        file_handler.close()
                         return
-                    current["fh"] = fh
+                    current["file_handler"] = file_handler
                     session = current
-            self.on_info(f"[ft] ACPT sid={sid} {session['fn']} ({session['sz']} bytes)")
+            self.on_info(f"[ft] ACPT sid={sid} {session['file_name']} ({session['size']} bytes)")
             self._send_next_chunk(sid)
             return
 
@@ -372,7 +406,7 @@ class FTv2:
         if op == "ABRT":
             if self.rx and self.rx["sid"] == sid:
                 try:
-                    self.rx["f"].close()
+                    self.rx["file_obj"].close()
                 except Exception:
                     pass
                 self.rx = None
@@ -392,11 +426,11 @@ class FTv2:
             return
 
         try:
-            self.rx["f"].write(chunk)
+            self.rx["file_obj"].write(chunk)
             self.rx["recv"] += len(chunk)
         except Exception:
             try:
-                self.rx["f"].close()
+                self.rx["file_obj"].close()
             except Exception:
                 pass
             self._send_ctrl(src_mac, {"op": "ABRT", "sid": self.rx["sid"]})
@@ -407,9 +441,9 @@ class FTv2:
         self.send_ack(
             src_mac, {"kind": ACK_KIND_DATA, "sid": self.rx["sid"], "seq": seq}
         )
-        self.on_progress("rx", self.rx["sid"], self.rx["recv"], self.rx["sz"])
+        self.on_progress("rx", self.rx["sid"], self.rx["recv"], self.rx["size"])
 
-        if self.rx["recv"] >= self.rx["sz"]:
+        if self.rx["recv"] >= self.rx["size"]:
             session = self.rx
             try:
                 session["f"].close()
@@ -451,10 +485,10 @@ class FTv2:
         if pending_id:
             self._data_retry.cancel(pending_id)
 
-        fh = session.get("fh")
-        if fh:
+        file_handler = session.get("file_handler")
+        if file_handler:
             try:
-                fh.close()
+                file_handler.close()
             except Exception:
                 pass
         return session
@@ -478,27 +512,27 @@ class FTv2:
             if not session or session.get("pending_id"):
                 return
             dst = session["dst"]
-            total = session["sz"]
+            total = session["size"]
             if total == 0:
                 drop_kind = "done"
             else:
-                fh = session.get("fh")
-                if fh is None:
+                file_handler = session.get("file_handler")
+                if file_handler is None:
                     try:
-                        fh = open(session["path"], "rb")
-                        session["fh"] = fh
+                        file_handler = open(session["path"], "rb")
+                        session["file_handler"] = file_handler
                     except OSError as exc:
                         drop_kind = "fail"
                         drop_exc = exc
                 if drop_kind is None:
-                    fh = session.get("fh")
-                    if fh is None:
+                    file_handler = session.get("file_handler")
+                    if file_handler is None:
                         drop_kind = "fail"
                         drop_exc = RuntimeError("failed to open file for reading")
                     else:
                         offset = session.get("next_offset", 0)
-                        fh.seek(offset)
-                        chunk = fh.read(self.chunk)
+                        file_handler.seek(offset)
+                        chunk = file_handler.read(self.chunk)
                         if chunk:
                             seq = session.get("next_seq", 0)
                             key = f"{sid}:{seq}"
@@ -506,7 +540,7 @@ class FTv2:
                                 "sid": sid,
                                 "seq": seq,
                                 "len": len(chunk),
-                                "fn": session["fn"],
+                                "file_name": session["file_name"],
                                 "attempt": 0,
                                 "dst": dst,
                             }
@@ -535,10 +569,10 @@ class FTv2:
             if not stored:
                 return
             dst = stored["dst"]
-            fn = stored["fn"]
+            file_name = stored["file_name"]
             if drop_kind == "done":
                 self._send_ctrl(dst, {"op": "DONE", "sid": sid})
-                self.on_info(f"[ft] TX DONE sid={sid} {fn}")
+                self.on_info(f"[ft] TX DONE sid={sid} {file_name}")
                 self.on_complete("tx", sid, True)
             else:
                 self.on_info(f"[ft] TX error sid={sid}: {drop_exc}")
@@ -598,8 +632,8 @@ class FTv2:
         if not dst and stored:
             dst = stored.get("dst")
         if stored:
-            fn = stored.get("fn", "?")
-            self.on_info(f"[ft] ABRT sid={sid} {fn} due to timeout")
+            file_name = stored.get("file_name", "?")
+            self.on_info(f"[ft] ABRT sid={sid} {file_name} due to timeout")
         if dst:
             self._send_ctrl(dst, {"op": "ABRT", "sid": sid})
         self.on_complete("tx", sid, False)
@@ -629,7 +663,7 @@ class FTv2:
             self.on_info("[ft] missing archive path for directory transfer")
             return False
         meta = session.get("meta") or {}
-        folder_hint = meta.get("dir_name") or os.path.splitext(session.get("fn", "folder"))[0]
+        folder_hint = meta.get("dir_name") or os.path.splitext(session.get("file_name", "folder"))[0]
         folder_name = os.path.basename(folder_hint) or "folder"
         target_dir = os.path.join(self.inbox, folder_name)
 
@@ -708,7 +742,7 @@ class FTv2:
                     )
                     acked = 0
                     total = 0
-                    fn = ""
+                    file_name = ""
                     dst_mac: Optional[bytes] = None
                     session_ref = None
                     with self._tx_lock:
@@ -717,15 +751,15 @@ class FTv2:
                             session["pending_id"] = None
                             session["acked"] = session.get("acked", 0) + ack_len
                             acked = session["acked"]
-                            total = session["sz"]
+                            total = session["size"]
                             dst_mac = session["dst"]
-                            fn = session["fn"]
+                            file_name = session["file_name"]
                             session_ref = session
                     if session_ref:
                         self.on_progress("tx", sid, acked, total)
                         if acked >= total and dst_mac is not None:
                             self._send_ctrl(dst_mac, {"op": "DONE", "sid": sid})
-                            self.on_info(f"[ft] TX DONE sid={sid} {fn}")
+                            self.on_info(f"[ft] TX DONE sid={sid} {file_name}")
                             self.on_complete("tx", sid, True)
                             self._drop_tx_session(sid)
                         else:

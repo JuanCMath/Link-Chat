@@ -99,7 +99,7 @@ class JSONPeerStore:
         >>> store.save(peers)
     """
 
-    def __init__(self, path: str = "/data/peers.json") -> None:
+    def __init__(self, path: str = "data/peers.json") -> None:
         """
         Initialize JSON peer store with file path.
 

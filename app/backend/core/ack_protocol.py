@@ -240,6 +240,42 @@ class AckRetryManager:
         with self._lock:
             self._items.pop(key, None)
 
+
+    def set_retry_interval (self, value: float) -> bool:
+        """
+        Change the value of data retry interval
+
+        Args:
+            value (float): new interval
+
+        Returns:
+            bool: the interval was changed succesfully
+        """
+        try:
+            with self._lock:
+                self.interval = max(0.5, value)
+            return True
+        except Exception:
+            return False
+        
+
+    def set_max_retries (self, value: int) -> bool:
+        """
+        Change the value of data max retries
+
+        Args:
+            value (int): new max retries value
+
+        Returns:
+            bool: the max retries value was changed succesfully
+        """
+        try:
+            with self._lock:
+                self.max_attempts = max(1, value)
+            return True
+        except Exception:
+            return False
+
     # Internal retry loop ---------------------------------------------
 
     def _loop(self) -> None:
