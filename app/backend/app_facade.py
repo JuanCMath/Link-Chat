@@ -407,6 +407,9 @@ class LinkChatApp:
         """
         try:
             self._active_peer = mac_str_to_bytes(mac_str)
+            if self.registry.get(mac_str):
+                self.registry.set_active(mac_str)
+
             return True
         except Exception:
             self._emit("[peer] Invalid MAC provided.")

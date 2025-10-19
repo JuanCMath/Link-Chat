@@ -1,7 +1,4 @@
-FROM python:3.13-slim
-
-# For security functions
-RUN pip install cryptography
+FROM linkchat-base
 
 WORKDIR /app
 COPY app/ ./app/

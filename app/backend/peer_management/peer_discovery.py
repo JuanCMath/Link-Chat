@@ -247,13 +247,11 @@ class PeerDiscovery:
 
         # Opportunistic name learning from chat messages
         # Format: "NAME: message content"
-        if ":" in text:
+        if ":" in text and self.registry.get(mac_address):
             potential_name = text.split(":", 1)[0].strip()[:64]
 
-            if self.registry.get(mac_address):
-                peer = self.registry.get(mac_address)
-                if peer:
-                    old_name = peer.name
-            # Only register if name is non-empty
-            if potential_name and len(old_name)==0:
-                self.registry.upsert(mac_address, potential_name)
+            peer = self.registry.get(mac_address)
+            if peer:
+                # Only register if name is non-empty
+                if potential_name and len(peer.name)==0:
+                    self.registry.upsert(mac_address, potential_name)

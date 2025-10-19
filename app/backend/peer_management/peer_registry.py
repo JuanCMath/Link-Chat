@@ -96,10 +96,11 @@ class PeerRegistry:
         self._peers: Dict[str, Peer] = {}
         self._store = store
         self._max_age = max_age
-        self._pruner : Optional[threading.Thread] = threading.Thread(target=self._prune_stale, name="pruner", daemon=True)
-        self._pruner.start()
+        self._active: Optional[Peer] = None
         self._stop_pruner = threading.Event()
         self._stop_pruner.clear()
+        self._pruner : Optional[threading.Thread] = threading.Thread(target=self._prune_stale, name="pruner", daemon=True)
+        self._pruner.start()
 
     def close(self) -> None:
         self._stop_pruner.set()
@@ -110,7 +111,7 @@ class PeerRegistry:
 
     # CRUD Operations -------------------------------------------------------
 
-    def upsert(self, mac: str, name: Optional[str] = None, save: bool = True) -> Peer:
+    def upsert(self, mac: str, name: Optional[str] = None, save: bool = True, activate: bool = False) -> Peer:
         """
         Insert or update a peer in the registry.
 
@@ -153,6 +154,9 @@ class PeerRegistry:
 
             # Persist to storage
             if save: self._store.save(self._peers)
+
+            # Set active
+            if(activate): self._active = peer
 
             return peer
 
@@ -208,6 +212,7 @@ class PeerRegistry:
         """
         with self._lock:
             self._peers.clear()
+            self._active = None
         self._store.reset()
 
     def remove_peer(self, mac: str, save: bool = True) -> bool:
@@ -222,8 +227,14 @@ class PeerRegistry:
         """
         with self._lock:
             if mac.lower() in self._peers:
-                self._peers.pop(mac.lower())
-                if save: self._store.save(self._peers)
+                peer = self._peers.pop(mac.lower())
+
+                if peer == self._active:
+                    self._active = None
+
+                if save: 
+                    self._store.save(self._peers)
+
                 return True
         
         return False
@@ -329,28 +340,43 @@ class PeerRegistry:
         return len(self._peers)
     
     def _prune_stale(self) -> None:
-
-        if(not self._stop_pruner):
-            self._stop_pruner = threading.Event()
-            self._stop_pruner.clear()
             
         while not self._stop_pruner.is_set():
-                       
-            with self._lock:
-                # Peers discovered
-                if len(self._peers)>=0:
-                    start_time = datetime.now()
-                    initial_len = len(self._peers)
+            try:
+                to_remove: List[Peer] = []
+                initial_len: int = 0   
+                with self._lock:
+                    # Peers discovered
+                    if len(self._peers)>0:
+                        start_time = datetime.now(timezone.utc)
+                        initial_len = len(self._peers)
 
-                    for peer in self._peers.values():
-                        delta = start_time - datetime.fromisoformat(peer.last_seen)
-                        if(delta.total_seconds() >= self._max_age):
-                            self.remove_peer(peer.mac, save = False)
+                        for peer in self._peers.values():
+                            delta = start_time - datetime.fromisoformat(peer.last_seen)
 
-                    if(initial_len > len(self._peers)): 
-                        self._store.save(self._peers)
+                            if(delta.total_seconds() >= self._max_age and peer != self._active):
+                                to_remove.append(peer)
+                                
+                for peer in to_remove:
+                    self.remove_peer(peer.mac, save = False)
+
+                if(initial_len > len(self._peers)): 
+                            self._store.save(self._peers)       
+
+            except Exception as e:
+                print(f"[PRUNE] {e}")
                     
             sleep(PRUNING_INTERVAL)
+
+
+
+    def set_active(self, mac: str) -> None:
+
+        if(self.get(mac) is not None):
+            self._active = self._peers[mac.lower()]
+
+        else:
+            with self._lock: self.upsert(mac, activate = True)
 
 
         

@@ -113,6 +113,9 @@ class JSONPeerStore:
         self.path = path
         self.directory = os.path.dirname(path) or "."
 
+        # Creates dir if doesn't esxist
+        os.makedirs(self.directory, exist_ok=True)
+
     def load(self) -> Dict[str, Peer]:
         """
         Load peers from JSON file.
