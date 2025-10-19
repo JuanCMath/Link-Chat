@@ -127,6 +127,8 @@ class LinkChatApp:
 
         self._store = JSONPeerStore(config.peers_file)
         self.registry = PeerRegistry(self._store, config.max_peer_age_secs)
+        self.iface_registries: Dict[str, PeerRegistry] = {}
+        self._current_iface = config.iface
 
         self._sock: Optional[SocketManager] = None
         self._mgr: Optional[ThreadManager] = None
@@ -641,6 +643,19 @@ class LinkChatApp:
             return False
 
         return True
+
+
+
+    def change_interface(self, iface: str) -> bool:
+        if(self._sock and self._sock.change_interface(iface)):
+            if(self._current_iface != iface):
+                self.iface_registries[iface] = self.registry
+                self.registry = self.iface_registries.get(iface, PeerRegistry(self._store, self.config.max_peer_age_secs))
+                self._current_iface = iface
+            return True
+        
+        return False
+        
 
 
     # Internal callbacks -------------------------------------------

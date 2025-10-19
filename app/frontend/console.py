@@ -32,6 +32,7 @@ Example:
 
 import sys
 import time
+from typing import List
 
 from ..backend.app_facade import LinkChatApp
 
@@ -170,15 +171,16 @@ class ConsoleFrontend:
                   False if line is not a command and should be treated as chat message.
 
         Supported Commands:
-            /me                           - Display local MAC and name
-            /peers                        - List all discovered peers
-            /peers reset                  - Clear peer database
-            /peer <MAC|Name>              - Set active peer for chat
-            /discover on|off              - Control beacon broadcasts
-            /sendfile <MAC|Name> <path>   - Transfer file to peer
-            /senddir <MAC|Name> <path>    - Transfer directory to peer
-            /sendtoall <text>             - Send message to everyone in the network
-            /quit                         - Shut down the program
+            /me                             - Display local MAC and name
+            /peers                          - List all discovered peers
+            /peers reset                    - Clear peer database
+            /peer <MAC|Name>                - Set active peer for chat
+            /discover on|off                - Control beacon broadcasts
+            /sendfile <MAC|Name> <path>     - Transfer file to peer
+            /senddir <MAC|Name> <path>      - Transfer directory to peer
+            /sendtoall <text>               - Send message to everyone in the network
+            /iface <optional (text, number)>- Swith used interface (show available if alone) 
+            /quit                           - Shut down the program
 
         Example:
             >>> frontend._handle_command("/peers")
@@ -294,6 +296,43 @@ class ConsoleFrontend:
             
             self.app.broadcast_chat(parts[1])
             return True
+        
+        # Command: /sendtoall <text> - Send broadcast
+        if line.startswith("/iface"):
+            parts = line.split(" ", 1)
+            if len(parts) > 2:
+                print(
+                    "[iface] Usage: /iface <optional (text, number)",
+                    flush=True,
+                )
+                return True
+            
+            else:
+                from ..backend.utils.network_utils import list_network_interfaces
+                ifaces = list_network_interfaces()
+
+                if len(parts) == 1:
+                    ConsoleFrontend.show_ifaces(ifaces)
+
+                elif len(parts) == 2:
+                    iface = ""
+                    try:
+                        iface = ifaces[int(parts[1])]
+                    except ValueError or IndexError:
+                        iface = parts[1]
+                    
+                    if not self.app.change_interface(iface):
+                       print(
+                        f"[iface] Interface {iface} not found. List available interfce with /iface",
+                        flush=True,
+                        ) 
+                    else:
+                        print(
+                        f"[iface] Switched to interface {iface}",
+                        flush=True,
+                        )
+                    
+            return True
 
         # Command: /quit - Shut down program
         if line.startswith("/quit"):
@@ -339,6 +378,7 @@ class ConsoleFrontend:
   /sendfile <MAC|Name> </path/to/file>    -> Send file to peer
   /senddir <MAC|Name> </path/to/dir>      -> Send directory (tar.gz, replaces on receive)
   /sendtoall <text>                       -> Send chat message to everyone in the network
+  /iface <optional (text, number)>        -> Swith used interface (show available if alone) 
   <free text>                             -> Send chat message to active peer
   /help                                   -> Show this help message
   /quit                                   -> Shut down the program
@@ -374,3 +414,9 @@ class ConsoleFrontend:
         # Infinite sleep loop to keep application alive
         while True:
             time.sleep(1)
+
+    @staticmethod
+    def show_ifaces(ifaces: List[str]) -> None:
+        print("Available interfaces:", flush=True)
+        for index, iface in enumerate(ifaces):
+            print(f"[{index}] {iface}", flush=True)

@@ -181,3 +181,17 @@ class SocketManager:
         except Exception:
             # Return null MAC if interface doesn't exist or isn't accessible
             return "00:00:00:00:00:00"
+        
+    def change_interface(self, new_iface: str = "") -> bool:
+        
+        ok = False
+
+        try:
+            self.close()
+            from ..utils.network_utils import is_iface_down
+            self.iface = self.iface if is_iface_down(new_iface) else new_iface
+            ok = (self.iface == new_iface)
+        finally:
+            self.open()
+        
+        return ok

@@ -330,7 +330,10 @@ class PeerRegistry:
     
     def _prune_stale(self) -> None:
 
-
+        if(not self._stop_pruner):
+            self._stop_pruner = threading.Event()
+            self._stop_pruner.clear()
+            
         while not self._stop_pruner.is_set():
                        
             with self._lock:

@@ -1,10 +1,10 @@
 FROM python:3.13-slim
 
+# For security functions
+RUN pip install cryptography
+
 WORKDIR /app
 COPY app/ ./app/
 COPY main.py ./
-
-# For security functions
-RUN pip install --no-cache-dir cryptography
 
 ENTRYPOINT [ "python", "main.py" ]

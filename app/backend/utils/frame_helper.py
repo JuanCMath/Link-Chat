@@ -38,6 +38,10 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 # Frame delimiter byte (01111110 binary)
 FLAG_BYTE = 0x7E
 
+# Size of header and crc in bytes
+HEADER_BYTES = 4
+CRC_BYTES = 2
+
 
 class FrameError(Exception):
     """Base exception for all frame processing errors."""
@@ -66,15 +70,15 @@ _AEAD = ChaCha20Poly1305(_key)
 
 
 
-def crc16_ccitt_checksum(data: bytes, polynomial: int = 0x1021, initial_value: int = 0xFFFF) -> int:
+def crc16_ccitt(data: bytes, polynomial: int = 0x1021, initial_value: int = 0xFFFF) -> int:
     """
-    Compute CRC-16-CCITT checksum for error detection.
+    Compute CRC-16-CCITT for error detection.
 
     Implements the CCITT polynomial (0x1021) with standard initial value (0xFFFF).
     This is a widely-used CRC variant for telecommunications.
 
     Args:
-        data: Input bytes to checksum.
+        data: Input bytes.
         polynomial: CRC polynomial (default: 0x1021).
         initial_value: Starting CRC register value (default: 0xFFFF).
 
@@ -262,7 +266,7 @@ def _build_payload_section(frame_type: int, seq: int, payload: bytes) -> bytes:
     body = header + payload
 
     # Calculate CRC over header + payload
-    crc = crc16_ccitt_checksum(body)
+    crc = crc16_ccitt(body)
     crc_bytes = struct.pack("!H", crc)
 
     return body + crc_bytes
@@ -284,25 +288,25 @@ def _parse_payload_section(data: bytes) -> Tuple[int, int, bytes]:
         FramingError: If section structure is invalid.
         CRCError: If CRC validation fails.
     """
-    if len(data) < 6:  # Minimum: 1+1+2+0+2 = 6 bytes
+    if len(data) < HEADER_BYTES + CRC_BYTES:  # Minimum, len(payload) = 0
         raise FramingError("Payload section too small (< 6 bytes)")
 
     # Unpack header
     frame_type, seq, payload_length = struct.unpack("!BBH", data[0:4])
 
     # Validate total length
-    expected_total_length = 4 + payload_length + 2  # header + payload + CRC
+    expected_total_length = HEADER_BYTES + payload_length + CRC_BYTES  # header + payload + CRC
     if len(data) != expected_total_length:
         raise FramingError(
             f"Length mismatch: got {len(data)} bytes, expected {expected_total_length}"
         )
 
     # Extract payload
-    payload = data[4 : 4 + payload_length]
+    payload = data[HEADER_BYTES : HEADER_BYTES + payload_length]
 
     # Extract and verify CRC
-    received_crc = struct.unpack("!H", data[4 + payload_length : 4 + payload_length + 2])[0]
-    calculated_crc = crc16_ccitt_checksum(data[0 : 4 + payload_length])
+    received_crc = struct.unpack("!H", data[HEADER_BYTES + payload_length : HEADER_BYTES + payload_length + CRC_BYTES])[0]
+    calculated_crc = crc16_ccitt(data[0 : HEADER_BYTES + payload_length])
 
     if received_crc != calculated_crc:
         raise CRCError(
@@ -337,16 +341,16 @@ def encode_frame(payload: bytes, frame_type: int = 1, seq: int = 0) -> bytes:
         - Bit stuffing prevents accidental flag byte occurrences in the data
     """
 
-    # --- NUEVO: cifrado AEAD ---
+    # --- AEAD encoding ---
     nonce = os.urandom(_NONCE_LEN)
     aad = struct.pack("!BB", frame_type & 0xFF, seq & 0xFF)
     ct_and_tag = _AEAD.encrypt(nonce, payload, aad)
     enc_payload = nonce + ct_and_tag
 
-    # Build section con CRC como siempre (sobre datos cifrados)
+    # Build section with CRC over encoded data
     section = _build_payload_section(frame_type, seq, enc_payload)
 
-    # Bit stuffing y flags como antes
+    # Bit stuffing and flags
     bits = bytes_to_bits(section)
     stuffed_bits = bit_stuff(bits)
     stuffed_bytes = bits_to_bytes(stuffed_bits)
@@ -437,11 +441,11 @@ def decode_frame(stream: bytes) -> Tuple[int, int, bytes]:
 
         raw_bytes = bits_to_bytes(unstuffed_bits)
 
-        # Recorte inteligente basado en LENGTH
-        if len(raw_bytes) >= 4:
+        # Length based prune
+        if len(raw_bytes) >= HEADER_BYTES:
             try:
                 ftype_tmp, seq_tmp, payload_length = struct.unpack("!BBH", raw_bytes[0:4])
-                expected_section_length = 4 + payload_length + 2
+                expected_section_length = HEADER_BYTES + payload_length + CRC_BYTES
                 if len(raw_bytes) >= expected_section_length:
                     raw_bytes = raw_bytes[:expected_section_length]
             except Exception:
@@ -450,7 +454,7 @@ def decode_frame(stream: bytes) -> Tuple[int, int, bytes]:
         try:
             frame_type, seq, enc_payload = _parse_payload_section(raw_bytes)
 
-            # --- NUEVO: descifrado AEAD ---
+            # --- AEAD decoding ---
             if len(enc_payload) < _NONCE_LEN + 16:  # 16B = tag
                 raise FrameError("Encrypted payload too short")
             nonce = enc_payload[:_NONCE_LEN]
@@ -508,7 +512,7 @@ def debug_inspect_frame(payload: bytes) -> None:
         return
 
     crc_recv = int.from_bytes(raw[4 + length : 4 + length + 2], "big")
-    crc_calc = crc16_ccitt_checksum(raw[0 : 4 + length])
+    crc_calc = crc16_ccitt(raw[0 : 4 + length])
     print(
         f"[ft/dbg] TYPE=0x{typ:02x} SEQ={seq} LEN={length} CRC recv=0x{crc_recv:04x} calc=0x{crc_calc:04x}",
         flush=True,
