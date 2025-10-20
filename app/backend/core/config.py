@@ -111,6 +111,7 @@ class LinkChatConfig:
     file_retry_interval: float
     file_max_retries: int
     max_peer_age_secs: float
+    file_window_size: int
 
 
 def _parse_bool_env(value: str | None, default: bool) -> bool:
@@ -195,5 +196,6 @@ def load_config(env: Mapping[str, str] | None = None) -> LinkChatConfig:
         msg_max_retries=int(env_mapping.get("MSG_MAX_RETRIES", "3")),
         file_retry_interval=float(env_mapping.get("FILE_RETRY_INTERVAL", file_retry_fallback)),
         file_max_retries=int(env_mapping.get("FILE_MAX_RETRIES", "3")),
-        max_peer_age_secs=float(env_mapping.get("STALE_TIME_UNTIL_PRUNE", "90"))
+        max_peer_age_secs=float(env_mapping.get("STALE_TIME_UNTIL_PRUNE", "90")),
+        file_window_size=int(env_mapping.get("FILE_WINDOW_SIZE", "8")),
     )

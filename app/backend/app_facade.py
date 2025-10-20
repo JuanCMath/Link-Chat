@@ -198,6 +198,7 @@ class LinkChatApp:
             on_ack=self._handle_ack,
             data_retry_interval=self.config.file_retry_interval,
             data_max_retries=self.config.file_max_retries,
+            window_size=self.config.file_window_size,
         )
 
         self.msg_ack_mgr = AckRetryManager(

@@ -92,6 +92,7 @@ class FTv2:
         data_retry_interval: float = 3.0,
         data_max_retries: int = 3,
         ack_retry_mgr: Optional[AckRetryManager] = None,
+        window_size: int = 1,
     ):
         """
         Initialize the file transfer manager.
@@ -129,6 +130,9 @@ class FTv2:
             self._data_retry = ack_retry_mgr
             self._own_retry_mgr = False
         self._data_retry.start()
+
+        # Sliding window: number of chunks allowed in-flight per TX session
+        self.window_size = max(1, int(window_size))
 
         os.makedirs(self.inbox, exist_ok=True)
 
@@ -180,7 +184,8 @@ class FTv2:
             "acked": 0,
             "next_seq": 0,
             "next_offset": 0,
-            "pending_id": None,
+            # pending: map key->len for outstanding chunks (keys are "{sid}:{seq}")
+            "pending": {},
             "file_handler": None,
             "kind": kind,
             "meta": meta or {},
@@ -446,7 +451,7 @@ class FTv2:
         if self.rx["recv"] >= self.rx["size"]:
             session = self.rx
             try:
-                session["f"].close()
+                session["file_obj"].close()
             except Exception:
                 pass
 
@@ -481,9 +486,12 @@ class FTv2:
         if not session:
             return None
 
-        pending_id = session.get("pending_id")
-        if pending_id:
-            self._data_retry.cancel(pending_id)
+        pending = session.get("pending") or {}
+        for key in list(pending.keys()):
+            try:
+                self._data_retry.cancel(key)
+            except Exception:
+                pass
 
         file_handler = session.get("file_handler")
         if file_handler:
@@ -503,19 +511,24 @@ class FTv2:
         Args:
             sid: Session ID of the active transfer.
         """
-        task: Optional[Dict[str, Any]] = None
+        
+        tasks: list[Dict[str, Any]] = []
         drop_kind: Optional[str] = None
         drop_exc: Optional[Exception] = None
 
         with self._tx_lock:
             session = self.tx.get(sid)
-            if not session or session.get("pending_id"):
+            if not session:
                 return
             dst = session["dst"]
             total = session["size"]
-            if total == 0:
+            pending = session.get("pending") or {}
+            outstanding = len(pending)
+            # If file is zero-length, handle completion
+            if total == 0 and outstanding == 0:
                 drop_kind = "done"
             else:
+                # Ensure file handler is open
                 file_handler = session.get("file_handler")
                 if file_handler is None:
                     try:
@@ -530,10 +543,13 @@ class FTv2:
                         drop_kind = "fail"
                         drop_exc = RuntimeError("failed to open file for reading")
                     else:
-                        offset = session.get("next_offset", 0)
-                        file_handler.seek(offset)
-                        chunk = file_handler.read(self.chunk)
-                        if chunk:
+                        # Fill window: send more chunks while we have room
+                        while outstanding < self.window_size:
+                            offset = session.get("next_offset", 0)
+                            file_handler.seek(offset)
+                            chunk = file_handler.read(self.chunk)
+                            if not chunk:
+                                break
                             seq = session.get("next_seq", 0)
                             key = f"{sid}:{seq}"
                             meta = {
@@ -544,20 +560,25 @@ class FTv2:
                                 "attempt": 0,
                                 "dst": dst,
                             }
-                            session["pending_id"] = key
+                            # register pending before releasing lock
+                            pending[key] = len(chunk)
+                            session["pending"] = pending
                             session["next_seq"] = (seq + 1) & 0xFF
                             session["next_offset"] = offset + len(chunk)
-                            task = {
+                            tasks.append({
                                 "dst": dst,
                                 "chunk": chunk,
                                 "seq": seq,
                                 "key": key,
                                 "meta": meta,
-                            }
-                        else:
+                            })
+                            outstanding += 1
+                        # If no outstanding and file exhausted, decide done/fail
+                        if outstanding == 0:
                             if session.get("acked", 0) >= total:
                                 drop_kind = "done"
                             else:
+                                # If no outstanding but acked < total, it's an error
                                 drop_kind = "fail"
                                 drop_exc = RuntimeError(
                                     "insufficient data to complete file"
@@ -580,44 +601,52 @@ class FTv2:
                 self.on_complete("tx", sid, False)
             return
 
-        if not task:
-            return
+        # Register all new tasks with retry manager (outside tx_lock to avoid deadlocks)
+        for task in tasks:
+            dst = task["dst"]
+            chunk = task["chunk"]
+            seq = task["seq"]
+            key = task["key"]
+            meta = task["meta"]
 
-        # Register chunk with retry manager
-        dst = task["dst"]
-        chunk = task["chunk"]
-        seq = task["seq"]
-        key = task["key"]
-        meta = task["meta"]
+            def make_send_once(dst_, chunk_, seq_, meta_):
+                def send_once() -> None:
+                    meta_["attempt"] = meta_.get("attempt", 0) + 1
+                    self._send_data(dst_, chunk_, seq_)
+                    if meta_["attempt"] == 1:
+                        self.on_info(
+                            f"[ft] TX data sid={sid} seq={seq_} len={len(chunk_)}"
+                        )
+                    else:
+                        self.on_info(
+                            f"[ft] retry sid={sid} seq={seq_} attempt={meta_['attempt']}"
+                        )
 
-        def send_once() -> None:
-            """Send or retry this specific chunk."""
-            meta["attempt"] = meta.get("attempt", 0) + 1
-            self._send_data(dst, chunk, seq)
-            if meta["attempt"] == 1:
-                self.on_info(f"[ft] TX data sid={sid} seq={seq} len={len(chunk)}")
-            else:
-                self.on_info(
-                    f"[ft] retry sid={sid} seq={seq} attempt={meta['attempt']}"
-                )
+                return send_once
 
-        def fail_fn(info: Dict[str, Any]) -> None:
-            """Called when max retries exceeded."""
-            attempts = info.get("attempt", 0)
-            self.on_info(f"[ft] no ACK sid={sid} seq={seq} after {attempts} attempts")
-            self._handle_chunk_failure(sid, info)
+            def make_fail_fn(sid_, seq_):
+                def fail_fn(info: Dict[str, Any]) -> None:
+                    attempts = info.get("attempt", 0)
+                    self.on_info(
+                        f"[ft] no ACK sid={sid_} seq={seq_} after {attempts} attempts"
+                    )
+                    self._handle_chunk_failure(sid_, info)
 
-        def error_fn(exc: Exception) -> None:
-            """Called if send_once raises an exception."""
-            self.on_info(f"[ft] error resending sid={sid} seq={seq}: {exc}")
+                return fail_fn
 
-        self._data_retry.add(
-            key,
-            send_once,
-            fail_fn=fail_fn,
-            meta=meta,
-            error_fn=error_fn,
-        )
+            def make_error_fn(sid_, seq_):
+                def error_fn(exc: Exception) -> None:
+                    self.on_info(f"[ft] error resending sid={sid_} seq={seq_}: {exc}")
+
+                return error_fn
+
+            self._data_retry.add(
+                key,
+                make_send_once(dst, chunk, seq, meta),
+                fail_fn=make_fail_fn(sid, seq),
+                meta=meta,
+                error_fn=make_error_fn(sid, seq),
+            )
 
     def _handle_chunk_failure(self, sid: str, meta: Dict[str, Any]) -> None:
         """
@@ -747,13 +776,20 @@ class FTv2:
                     session_ref = None
                     with self._tx_lock:
                         session = self.tx.get(sid)
-                        if session and session.get("pending_id") == key:
-                            session["pending_id"] = None
-                            session["acked"] = session.get("acked", 0) + ack_len
-                            acked = session["acked"]
-                            total = session["size"]
-                            dst_mac = session["dst"]
-                            file_name = session["file_name"]
+                        if session:
+                            pending = session.get("pending") or {}
+                            # remove acknowledged key if present
+                            if key in pending:
+                                try:
+                                    del pending[key]
+                                except Exception:
+                                    pass
+                                session["pending"] = pending
+                                session["acked"] = session.get("acked", 0) + ack_len
+                            acked = session.get("acked", 0)
+                            total = session.get("size", 0)
+                            dst_mac = session.get("dst")
+                            file_name = session.get("file_name", "")
                             session_ref = session
                     if session_ref:
                         self.on_progress("tx", sid, acked, total)
@@ -763,6 +799,7 @@ class FTv2:
                             self.on_complete("tx", sid, True)
                             self._drop_tx_session(sid)
                         else:
+                            # attempt to refill window
                             self._send_next_chunk(sid)
                 else:
                     self.on_info(
