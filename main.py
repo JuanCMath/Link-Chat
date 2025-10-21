@@ -86,13 +86,25 @@ def main() -> None:
         ^C
         # Clean shutdown
     """
-    config = load_config()
-    app = LinkChatApp(config)
-    try:
-        ConsoleFrontend(app).run()
-    except KeyboardInterrupt:
-        # Graceful shutdown on Ctrl+C
-        pass
+
+    gui = input("\nStart gui? (y/n, default is n): ").lower().__contains__('y')
+
+    if(gui):
+        from app.gui_pyqt6.gui import main
+        try:
+            main()
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            pass
+        return
+    else:
+        config = load_config()
+        app = LinkChatApp(config)
+        try:
+            ConsoleFrontend(app).run()
+        except KeyboardInterrupt:
+            # Graceful shutdown on Ctrl+C
+            pass
 
 
 if __name__ == "__main__":

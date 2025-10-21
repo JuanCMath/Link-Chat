@@ -8,6 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends iproute2 \
 # For security functions
 RUN pip install cryptography
 
+#for gui
+RUN pip install PyQt6
+
 # El resto de la imagen se construye encima de esta base
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
