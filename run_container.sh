@@ -27,6 +27,8 @@ IMAGE=${IMAGE:-linkchat}
 : ${ETHERTYPE:=${ETHERTYPE:-0x88B5}}
 : ${BEACON_INTERVAL:=${BEACON_INTERVAL:-5}}
 
+GUI=${GUI:-0}
+
 # Aseguramos el directorio de datos en el host (crea los padres si es necesario y no falla si el directorio existe)
 mkdir -p "$HOST_DATA_DIR"
 
@@ -60,6 +62,19 @@ fi
 #  -v           : monta datos persistentes en /data
 #  -e           : variables de entorno para la aplicación
 
+RUN_XSOCKS=""
+if [ "$GUI" = "1" ]; then
+  # Reenvío GUI en WSLg (Wayland + X + Audio)
+  RUN_XSOCKS="$RUN_XSOCKS \
+    -e DISPLAY=$DISPLAY \
+    -e WAYLAND_DISPLAY=$WAYLAND_DISPLAY \
+    -e XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \
+    -e PULSE_SERVER=$PULSE_SERVER \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+    -v /mnt/wslg:/mnt/wslg"
+fi
+
+
 docker run --rm -it \
   --name "$NAME" \
   --cap-add NET_RAW \
@@ -69,4 +84,5 @@ docker run --rm -it \
   -e IFACE="$IFACE" \
   -e ETHERTYPE="$ETHERTYPE" \
   -e BEACON_INTERVAL="$BEACON_INTERVAL" \
+  $RUN_XSOCKS \
   $IMAGE

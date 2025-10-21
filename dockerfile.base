@@ -9,3 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends iproute2 \
 RUN pip install cryptography
 
 # El resto de la imagen se construye encima de esta base
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    libxkbcommon0 libx11-6 libxcb1 libxext6 libglib2.0-0 libgl1 \
+    libpulse0 xdg-utils fonts-dejavu-core \
+ && rm -rf /var/lib/apt/lists/*
