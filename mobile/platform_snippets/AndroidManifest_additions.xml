@@ -1,0 +1,24 @@
+<!--
+  Add these <uses-permission> entries inside <manifest> in
+  android/app/src/main/AndroidManifest.xml (above the <application> tag),
+  after running `flutter create`.
+
+  - INTERNET / ACCESS_WIFI_STATE / ACCESS_NETWORK_STATE: required for the
+    UDP discovery beacons and TCP connections.
+  - CHANGE_WIFI_MULTICAST_STATE: some OEM WiFi stacks drop broadcast
+    datagrams unless the app acquires a multicast lock; DiscoveryService
+    doesn't take the lock itself (not all devices need it), but the
+    permission must be declared for that codepath to be added later if a
+    given device turns out to need it.
+  - READ_EXTERNAL_STORAGE (maxSdkVersion 32): only exercised on Android 12
+    and below when the user picks a file from shared storage via
+    file_picker; Android 13+ uses the system photo/file picker instead and
+    needs no permission.
+-->
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+<uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+<uses-permission
+    android:name="android.permission.READ_EXTERNAL_STORAGE"
+    android:maxSdkVersion="32" />

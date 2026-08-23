@@ -1,0 +1,20 @@
+<!--
+  Add these keys inside the top-level <dict> in ios/Runner/Info.plist,
+  after running `flutter create`.
+
+  NSLocalNetworkUsageDescription is required from iOS 14 onward for any app
+  that sends/receives on the local subnet (our UDP beacons + TCP
+  connections trigger the system's "Local Network" permission prompt).
+  NSBonjourServices is only needed if you later switch discovery to
+  NSNetService/Bonjour instead of raw UDP broadcast; left here commented out
+  as a reminder in case that swap happens.
+-->
+<key>NSLocalNetworkUsageDescription</key>
+<string>Link-Chat necesita acceder a la red local para descubrir e intercambiar mensajes y archivos con otros dispositivos conectados a la misma WiFi.</string>
+
+<!--
+<key>NSBonjourServices</key>
+<array>
+  <string>_linkchat._tcp</string>
+</array>
+-->
