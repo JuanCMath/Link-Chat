@@ -38,6 +38,7 @@ import os
 import shutil
 import tarfile
 import threading
+from collections import deque
 import uuid
 from typing import Any, Callable, Dict, Optional
 
@@ -360,6 +361,13 @@ class FTv2:
                 "file_name": file_name,
                 "kind": kind,
                 "meta": meta,
+                # Recently-written seq numbers, for duplicate detection: if an
+                # ACK is lost in transit, the sender retransmits a chunk we
+                # already wrote. seq wraps at 256 and gets legitimately
+                # reused later in long transfers, so this only needs to
+                # remember chunks still within reach of a retry (bounded by
+                # the sender's sliding window), not the whole transfer.
+                "recent_seqs": deque(maxlen=32),
             }
             self._send_ctrl(src_mac, {"op": "ACPT", "sid": sid})
             self.on_info(f"[ft] ACPT sid={sid} {file_name} ({size} bytes)")
@@ -430,9 +438,19 @@ class FTv2:
         if self._mac2s(src_mac) != self.rx["src"]:
             return
 
+        if seq in self.rx["recent_seqs"]:
+            # Duplicate delivery (our ACK for this chunk was lost, so the
+            # sender retried): re-send the ACK so it stops retrying, but
+            # don't write the chunk again -- it's already on disk.
+            self.send_ack(
+                src_mac, {"kind": ACK_KIND_DATA, "sid": self.rx["sid"], "seq": seq}
+            )
+            return
+
         try:
             self.rx["file_obj"].write(chunk)
             self.rx["recv"] += len(chunk)
+            self.rx["recent_seqs"].append(seq)
         except Exception:
             try:
                 self.rx["file_obj"].close()
