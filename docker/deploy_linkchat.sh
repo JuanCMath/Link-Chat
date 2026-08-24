@@ -11,13 +11,17 @@
 # Uso:
 #   ./deploy_linkchat.sh [container_name] [host_data_dir] [network_mode]
 # Ejemplo:
-#   ./deploy_linkchat.sh MyNode ./data/MyNode linknet
+#   ./deploy_linkchat.sh MyNode ../data/MyNode linknet
 #
+# Corre siempre relativo a esta carpeta (docker/), sin importar desde dónde
+# se invoque el script. host_data_dir es relativo a esta misma carpeta.
 
 set -eu
 
+cd "$(dirname "$0")"
+
 NAME=${1:-LinkChatNode}
-HOST_DATA_DIR=${2:-./data/Local}
+HOST_DATA_DIR=${2:-../data/Local}
 NETWORK=${3:-linknet}
 PARENT=${PARENT:-eth0}
 

@@ -10,14 +10,15 @@ Dos terminales, dos nodos Docker en la misma red virtual.
 ### Setup (antes de la clase, para no perder tiempo en vivo)
 
 ```bash
+cd docker
 chmod +x build_images.sh create_network.sh run_container.sh deploy_linkchat.sh
-./deploy_linkchat.sh NodoA ./data/NodoA linknet
+./deploy_linkchat.sh NodoA ../data/NodoA linknet
 ```
 
-En otra terminal:
+En otra terminal (también parada en `docker/`):
 
 ```bash
-./run_container.sh NodoB ./data/NodoB linknet
+./run_container.sh NodoB ../data/NodoB linknet
 ```
 
 Esto entra directo a la consola interactiva de cada nodo (`docker attach` lo

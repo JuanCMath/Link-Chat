@@ -59,9 +59,9 @@ Link-Chat/
 │   ├── frontend/        # Consola
 │   └── gui_pyqt6/       # Interfaz gráfica
 ├── main.py              # Entry point del cliente de escritorio
-├── docker-compose.yml, dockerfile*, *.sh   # Despliegue en Docker
+├── docker/              # Dockerfiles, docker-compose.yml y scripts de despliegue
+├── docs/                # RUNNING_APP.md, GUION_EXPOSICION.md
 ├── req/linkchat.md      # Enunciado original de la asignatura
-├── RUNNING_APP.md       # Cómo correr el cliente de escritorio
 │
 └── mobile/              # Cliente Flutter (Android/iOS)
     ├── lib/network/     # Descubrimiento UDP, conexión TCP, cifrado, framing
@@ -73,10 +73,11 @@ Link-Chat/
 
 ## Cómo correr cada cliente
 
-- **Escritorio**: ver [`RUNNING_APP.md`](RUNNING_APP.md) (scripts de Docker:
-  `build_images.sh`, `create_network.sh`, `run_container.sh`,
-  `deploy_linkchat.sh`). También corre directo con `python main.py` si tenés
-  permisos de socket raw (root/CAP_NET_RAW) en Linux.
+- **Escritorio**: ver [`docs/RUNNING_APP.md`](docs/RUNNING_APP.md) (scripts
+  de Docker en [`docker/`](docker): `build_images.sh`, `create_network.sh`,
+  `run_container.sh`, `deploy_linkchat.sh`). También corre directo con
+  `python main.py` si tenés permisos de socket raw (root/CAP_NET_RAW) en
+  Linux.
 - **Móvil**: ver [`mobile/SETUP.md`](mobile/SETUP.md) — instalar el SDK de
   Flutter, generar `android/`/`ios/`, `flutter pub get`, y correr en dos
   dispositivos en la misma WiFi para ver el descubrimiento y la mensajería

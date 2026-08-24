@@ -6,18 +6,24 @@
 # Lanza un contenedor Link-Chat.
 # Argumentos:
 #   $1 - Nombre del contenedor (opcional). Default: LinkChatNode
-#   $2 - Directorio host a montar en /data (opcional). Default: ./data/Local
+#   $2 - Directorio host a montar en /data (opcional, relativo a esta
+#        carpeta docker/). Default: ../data/Local (es decir, data/Local en
+#        la raíz del repo)
 #   $3 - Red Docker a usar (opcional). Default: linknet (o 'host' para modo host)
 #
 # Variables de entorno exportables (si no se pasan, se usan los valores por defecto):
 #   NAME, IFACE, ETHERTYPE, BEACON_INTERVAL
 #
 # Ejemplo simple:
-#   ./run_container.sh MyNode ./data/MyNode linknet
+#   ./run_container.sh MyNode ../data/MyNode linknet
 #
+# Corre siempre relativo a esta carpeta (docker/), sin importar desde dónde
+# se invoque el script.
+
+cd "$(dirname "$0")"
 
 NAME=${1:-LinkChatNode}
-HOST_DATA_DIR=${2:-./data/Local}
+HOST_DATA_DIR=${2:-../data/Local}
 NETWORK=${3:-linknet}
 IMAGE=${IMAGE:-linkchat}
 

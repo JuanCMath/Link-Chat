@@ -1,0 +1,89 @@
+version: "3.9"
+
+name: linkchat-gui
+
+services:
+  nodoA:
+    container_name: nodoA
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: linkchat:latest
+    command: ["python3", "-m", "app.gui_pyqt6.gui"]
+    environment:
+      # ---- Config LinkChat (ajústalas si quieres) ----
+      NAME: "NodoA"
+      IFACE: "eth0"
+      ETHERTYPE: "0x88B5"
+      BEACON_INTERVAL: "5.0"
+      # LINKCHAT_PSK: "0000000000000000000000000000000000000000000000000000000000000000"  # opcional (64 hex)
+
+      # ---- Variables GUI para WSLg ----
+      # En WSLg, Wayland y Pulse viven en /mnt/wslg; DISPLAY es :0 por compatibilidad X11.
+      DISPLAY: ":0"
+      WAYLAND_DISPLAY: "wayland-0"
+      XDG_RUNTIME_DIR: "/mnt/wslg/runtime-dir"
+      PULSE_SERVER: "unix:/mnt/wslg/PulseServer"
+    volumes:
+      # Datos persistentes del nodo (inbox, peers.json, etc.)
+      - ../data/NodoA:/data
+
+      # Mapeo de sockets WSLg (X11/Wayland/Audio)
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /mnt/wslg:/mnt/wslg
+    cap_add:
+      - NET_RAW
+    networks:
+      - linknet
+
+  nodoB:
+    container_name: nodoB
+    image: linkchat:latest
+    command: ["python3", "-m", "app.gui_pyqt6.gui"]
+    environment:
+      NAME: "NodoB"
+      IFACE: "eth0"
+      ETHERTYPE: "0x88B5"
+      BEACON_INTERVAL: "5.0"
+      DISPLAY: ":0"
+      WAYLAND_DISPLAY: "wayland-0"
+      XDG_RUNTIME_DIR: "/mnt/wslg/runtime-dir"
+      PULSE_SERVER: "unix:/mnt/wslg/PulseServer"
+    volumes:
+      - ../data/NodoB:/data
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /mnt/wslg:/mnt/wslg
+    cap_add:
+      - NET_RAW
+    networks:
+      - linknet
+
+  nodoC:
+    container_name: nodoC
+    image: linkchat:latest
+    command: ["python3", "-m", "app.gui_pyqt6.gui"]
+    environment:
+      NAME: "NodoC"
+      IFACE: "eth0"
+      ETHERTYPE: "0x88B5"
+      BEACON_INTERVAL: "5.0"
+      DISPLAY: ":0"
+      WAYLAND_DISPLAY: "wayland-0"
+      XDG_RUNTIME_DIR: "/mnt/wslg/runtime-dir"
+      PULSE_SERVER: "unix:/mnt/wslg/PulseServer"
+    volumes:
+      - ../data/NodoC:/data
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /mnt/wslg:/mnt/wslg
+    cap_add:
+      - NET_RAW
+    networks:
+      - linknet
+
+networks:
+  linknet:
+    driver: bridge
+    # Si ya tienes una red creada por script y quieres reutilizarla,
+    # comenta lo anterior y descomenta:
+    # external: true
+    # name: linknet
