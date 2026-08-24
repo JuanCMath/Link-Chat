@@ -1,5 +1,11 @@
 # Link-Chat
 
+![Python](https://img.shields.io/badge/Python-3.13%2B-3776AB?logo=python&logoColor=white)
+![Flutter](https://img.shields.io/badge/Flutter-3.47-02569B?logo=flutter&logoColor=white)
+![Dart](https://img.shields.io/badge/Dart-3.13-0175C2?logo=dart&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
+![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Android%20%7C%20iOS-lightgrey)
+
 Mensajería punto a punto con transferencia de archivos, sin depender de ningún
 servidor central. El proyecto tiene dos clientes:
 
@@ -17,7 +23,16 @@ servidor central. El proyecto tiene dos clientes:
    conexión (X25519 + ChaCha20-Poly1305) en vez del PSK global fijo del
    proyecto original.
 
-## Requisitos del curso — estado
+## Índice
+
+- [Requisitos del curso](#requisitos-del-curso)
+- [Estructura del repositorio](#estructura-del-repositorio)
+- [Cómo correr cada cliente](#cómo-correr-cada-cliente)
+- [Arquitectura en una línea](#arquitectura-en-una-línea)
+- [Piezas interesantes del código](#piezas-interesantes-del-código)
+- [Autores](#autores)
+
+## Requisitos del curso
 
 A partir de [`req/linkchat.md`](req/linkchat.md):
 
@@ -65,9 +80,7 @@ Link-Chat/
 - **Móvil**: ver [`mobile/SETUP.md`](mobile/SETUP.md) — instalar el SDK de
   Flutter, generar `android/`/`ios/`, `flutter pub get`, y correr en dos
   dispositivos en la misma WiFi para ver el descubrimiento y la mensajería
-  en acción. El protocolo de red (descubrimiento, cifrado, transferencia de
-  archivos) ya está probado de punta a punta sobre sockets reales en
-  [`mobile/test/two_peers_integration_test.dart`](mobile/test/two_peers_integration_test.dart).
+  en acción.
 
 ## Arquitectura en una línea
 
@@ -79,6 +92,32 @@ Link-Chat/
   X25519 por conexión → AEAD ChaCha20-Poly1305 con clave de sesión → sin
   ACK/retry manual para los datos, porque TCP ya garantiza entrega
   ordenada y completa.
+
+## Piezas interesantes del código
+
+Algunos puntos de entrada si querés ver el proyecto sin leerlo entero:
+
+- [`app/backend/core/raw_socket.py`](app/backend/core/raw_socket.py) —
+  socket AF_PACKET crudo, filtrado por EtherType propio, sin tocar IP/TCP/UDP.
+- [`app/backend/utils/frame_helper.py`](app/backend/utils/frame_helper.py) —
+  framing manual con flags, bit-stuffing, CRC16 y cifrado AEAD, porque a
+  nivel de enlace no hay nada de eso gratis.
+- [`app/backend/core/file_transfer.py`](app/backend/core/file_transfer.py)
+  ([línea `recent_seqs`](app/backend/core/file_transfer.py#L441)) —
+  protocolo de transferencia con ventana deslizante; ahí está el fix de un
+  bug real de corrupción por chunks duplicados que encontré corriendo dos
+  contenedores Docker reales uno contra el otro
+  ([commit `7694c3b`](https://github.com/JuanCMath/Link-Chat/commit/7694c3b)).
+- [`mobile/lib/network/crypto_session.dart`](mobile/lib/network/crypto_session.dart) —
+  handshake X25519 + HKDF + ChaCha20-Poly1305 negociado por conexión, en vez
+  del PSK global fijo del cliente de escritorio.
+- [`mobile/lib/network/peer_connection.dart`](mobile/lib/network/peer_connection.dart#L52)
+  (uso de `asyncMap`) — fix de una condición de carrera real: frames
+  descifrados fuera de orden cuando llegan varios juntos en una misma
+  lectura TCP.
+- [`mobile/test/two_peers_integration_test.dart`](mobile/test/two_peers_integration_test.dart) —
+  test de integración que levanta dos peers reales hablando por socket UDP/TCP
+  de verdad (sin mocks); así se encontraron los dos bugs de arriba.
 
 ## Autores
 
